@@ -260,11 +260,14 @@ def select_season(seasons: list[dict[str, Any]]) -> Union[dict[str, Any], str, N
 
 def select_episode(
     episodes: list[dict[str, Any]], 
-    downloaded_ids: set[int] = None
+    downloaded_ids: set[int] = None,
+    default: dict[str, Any] = None
 ) -> Union[dict[str, Any], str, None]:
     choices: list[questionary.Choice] = []
     if downloaded_ids is None:
         downloaded_ids = set()
+
+    default_choice = None
 
     for ep in episodes:
         num: int = ep.get("number", 0)
@@ -282,15 +285,25 @@ def select_episode(
             ("", f"Ep {num:02d}: "),
             ("class:ansidarkgray", title),
         ])
-        choices.append(questionary.Choice(title=label, value=ep))
+        choice = questionary.Choice(title=label, value=ep)
+        choices.append(choice)
+        
+        if default and default.get("id") == ep_id:
+            default_choice = choice
 
     choices.append(_back())
+    
+    kwargs = {}
+    if default_choice:
+        kwargs["default"] = default_choice
+
     return questionary.select(
         "Select Episode:",
         choices=choices,
         style=cove_style,
         qmark="",
         pointer="❯",
+        **kwargs
     ).ask()
 
 

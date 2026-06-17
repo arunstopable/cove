@@ -426,6 +426,7 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             input("\nPress Enter to return...")
             continue
 
+        last_episode = None
         while True:
             downloaded_nums = get_downloaded_ep_nums(safe_filename(name), season_num)
             downloaded_ids = {ep["id"] for ep in episodes if ep.get("number") in downloaded_nums and "id" in ep}
@@ -433,9 +434,11 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             ui.clear_screen()
             ui.print_header()
             ui.show_info(f"Show: {name} (Season {season_num})")
-            episode = ui.select_episode(episodes, downloaded_ids)
+            episode = ui.select_episode(episodes, downloaded_ids, default=last_episode)
             if not episode or episode == "BACK":
                 break
+                
+            last_episode = episode
 
             ep_id: int = episode.get("id", 0)
             ep_num: int = episode.get("number", 0)
