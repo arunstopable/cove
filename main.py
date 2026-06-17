@@ -26,6 +26,10 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         rprint("[yellow]Please mount your NFS volumes first and try again.[/yellow]")
         return
         
+    server_ip = ui.ask_server_ip()
+    if not server_ip:
+        server_ip = "127.0.0.1"
+        
     title_id = sc_title['id']
     name = safe_filename(sc_title.get('name', 'Unknown'))
     
@@ -59,7 +63,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                     
                     strm_path = os.path.join(season_dir, f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.strm")
                     with open(strm_path, "w", encoding="utf-8") as f:
-                        f.write(f"http://127.0.0.1:8000/play?title_id={title_id}&episode_id={ep_id}")
+                        f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
                         
         rprint(f"[green]Successfully exported TV Show: {name}[/green]")
         rprint(f"[dim]Saved to: {shows_dir}[/dim]")
@@ -86,7 +90,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                 
             strm_path = os.path.join(movies_dir, f"{name}.strm")
             with open(strm_path, "w", encoding="utf-8") as f:
-                f.write(f"http://127.0.0.1:8000/play?title_id={title_id}&episode_id={ep_id}")
+                f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
                 
         rprint(f"[green]Successfully exported Movie: {name}[/green]")
         rprint(f"[dim]Saved to: {movies_dir}[/dim]")
