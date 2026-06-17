@@ -56,6 +56,8 @@ def play_stream(request: Request, title_id: int, episode_id: int):
                 if line.startswith("http"):
                     encoded_url = urllib.parse.quote(line)
                     modified_lines.append(f"{request.base_url}proxy_child?url={encoded_url}")
+                elif line.startswith("#EXT-X-MEDIA:TYPE=SUBTITLES"):
+                    continue  # Strip embedded subtitles to avoid conflict with external .vtt sidecars in Jellyfin
                 elif line.startswith("#EXT-X-MEDIA:"):
                     match = re.search(r'URI="([^"]+)"', line)
                     if match:
@@ -63,6 +65,10 @@ def play_stream(request: Request, title_id: int, episode_id: int):
                         encoded_url = urllib.parse.quote(original_uri)
                         new_uri = f"{request.base_url}proxy_child?url={encoded_url}"
                         line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
+                    modified_lines.append(line)
+                elif line.startswith("#EXT-X-STREAM-INF"):
+                    # Remove SUBTITLES attribute to cleanly detach from stripped subtitle tracks
+                    line = re.sub(r',SUBTITLES="[^"]+"', '', line)
                     modified_lines.append(line)
                 else:
                     modified_lines.append(line)
