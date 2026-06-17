@@ -144,7 +144,7 @@ def main() -> None:
         scraper.init_session()
         
     if not scraper.active_domain:
-        rprint("[red]Failed to resolve StreamingCommunity domain.[/red]")
+        rprint("[red]Failed to resolve streaming domain.[/red]")
         sys.exit(1)
         
     rprint(f"[dim]Active domain: {scraper.active_domain}[/dim]\n")
@@ -204,7 +204,7 @@ def main() -> None:
                         results = scraper.search(title_to_search)
                         
                     if not results:
-                        rprint(f"[red]No matches found for '{title_to_search}' on StreamingCommunity.[/red]")
+                        rprint(f"[red]No matches found for '{title_to_search}'.[/red]")
                         continue
                         
                     sc_title: Optional[dict[str, Any]] = None
@@ -231,7 +231,7 @@ def main() -> None:
                     else:
                         handle_movie(scraper, sc_title)
                             
-        elif action == "Search StreamingCommunity":
+        elif action == "Search":
             query = questionary.text("Enter title to search:").ask()
             if not query:
                 continue

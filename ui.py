@@ -7,7 +7,7 @@ from typing import Any, Optional, Union
 console = Console()
 
 def print_header() -> None:
-    console.print(Panel.fit("[bold cyan]Cove 2.0[/bold cyan]\n[dim]StreamingCommunity CLI[/dim]", border_style="cyan"))
+    console.print(Panel.fit("[bold cyan]Cove 2.0[/bold cyan]\n[dim]Your personal streaming CLI[/dim]", border_style="cyan"))
 
 def show_spinner(task_msg: str) -> Progress:
     return Progress(
@@ -20,10 +20,10 @@ def select_action(is_logged_in: bool) -> Optional[str]:
     choices = []
     if is_logged_in:
         choices.append("My List (Watching)")
-        choices.append("Search StreamingCommunity")
+        choices.append("Search")
         choices.append("Logout from Kino")
     else:
-        choices.append("Search StreamingCommunity")
+        choices.append("Search")
         choices.append("Login to Kino")
     choices.append("Exit")
 
