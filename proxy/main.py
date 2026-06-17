@@ -43,6 +43,12 @@ logging.basicConfig(
 log = logging.getLogger("cove.proxy")
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Global Configuration
+# ──────────────────────────────────────────────────────────────────────────────
+VIXCLOUD_REFERER = "https://vixcloud.co/"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Global state
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -96,7 +102,7 @@ async def download_worker() -> None:
                 "ffmpeg", "-y", "-v", "error", 
                 "-allowed_extensions", "ALL", 
                 "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-                "-headers", f"Referer: {VIXCLOUD_REFERER}\r\n",
+                "-headers", f"Referer: {VIXCLOUD_REFERER}\r\nUser-Agent: {USER_AGENT}\r\n",
                 "-i", m3u8_url,
                 "-map", "0:v:0", "-map", "0:a", "-map", "0:s?",
                 "-c:v", "copy", "-c:a", "aac", "-c:s", "copy",
@@ -286,7 +292,7 @@ async def play_m3u8(title_id: int, episode_id: int, request: Request) -> Respons
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(m3u8_url, headers={"Referer": VIXCLOUD_REFERER})
+            resp = await client.get(m3u8_url, headers={"Referer": VIXCLOUD_REFERER, "User-Agent": USER_AGENT})
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail="Failed to fetch master M3U8.")
 
@@ -312,7 +318,7 @@ async def proxy_child_m3u8(url: str, request: Request) -> Response:
     """
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers={"Referer": VIXCLOUD_REFERER})
+            resp = await client.get(url, headers={"Referer": VIXCLOUD_REFERER, "User-Agent": USER_AGENT})
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail="Failed to fetch child M3U8.")
 
@@ -338,7 +344,7 @@ async def proxy_enc_key(url: str) -> Response:
     """
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers={"Referer": VIXCLOUD_REFERER})
+            resp = await client.get(url, headers={"Referer": VIXCLOUD_REFERER, "User-Agent": USER_AGENT})
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail="Failed to fetch encryption key.")
         return Response(content=resp.content, media_type="application/octet-stream")
