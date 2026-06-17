@@ -5,8 +5,17 @@ import urllib.parse
 import re
 
 from sc_scraper import SCScraper
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Cove Proxy for Jellyfin")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize a global scraper instance
 scraper = SCScraper()
@@ -46,13 +55,13 @@ def play_stream(request: Request, title_id: int, episode_id: int):
             for line in lines:
                 if line.startswith("http"):
                     encoded_url = urllib.parse.quote(line)
-                    modified_lines.append(f"/proxy_child?url={encoded_url}")
+                    modified_lines.append(f"{request.base_url}proxy_child?url={encoded_url}")
                 elif line.startswith("#EXT-X-MEDIA:"):
                     match = re.search(r'URI="([^"]+)"', line)
                     if match:
                         original_uri = match.group(1)
                         encoded_url = urllib.parse.quote(original_uri)
-                        new_uri = f"/proxy_child?url={encoded_url}"
+                        new_uri = f"{request.base_url}proxy_child?url={encoded_url}"
                         line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
                     modified_lines.append(line)
                 else:
