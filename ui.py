@@ -59,9 +59,9 @@ def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, An
     for r in results:
         title = r.get('name', 'Unknown')
         if r.get('type') == 'tv':
-            tag = "🟢"
+            tag = "\033[32m•\033[0m" # Green dot
         else:
-            tag = "🔵"
+            tag = "\033[34m•\033[0m" # Blue dot
         choices.append(questionary.Choice(title=f"{tag} {title}", value=r))
         
     return questionary.select(
