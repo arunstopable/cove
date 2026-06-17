@@ -9,8 +9,7 @@ import httpx
 import ui
 from sc_scraper import SCScraper
 import config
-
-import concurrent.futures
+import time
 import re
 
 def safe_filename(name: str) -> str:
@@ -55,37 +54,34 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                 season_data = scraper.get_season_details(title_id, sc_title.get('slug', ''), season_num)
                 episodes = season_data.get('loadedSeason', {}).get('episodes', [])
                 
-                futures = []
-                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                    for ep in episodes:
-                        def _export_ep(ep_data=ep):
-                            ep_num = ep_data.get('number', 0)
-                            ep_id = ep_data['id']
-                            ep_name = safe_filename(ep_data.get('name', f"Episode {ep_num}"))
-                            
-                            base_name = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}"
-                            strm_path = os.path.join(season_dir, f"{base_name}.strm")
-                            with open(strm_path, "w", encoding="utf-8") as f:
-                                f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
-                                
-                            # Scarica i sottotitoli in modo asincrono per non bloccare l'export
-                            try:
-                                _, subs = scraper.get_stream_url(title_id, ep_id)
-                                if subs:
-                                    for sub in subs:
-                                        sub_lang = "ita" if "ita" in sub['name'].lower() else "eng" if "eng" in sub['name'].lower() else "un"
-                                        if "forced" in sub['name'].lower():
-                                            sub_lang += ".forced"
-                                        sub_path = os.path.join(season_dir, f"{base_name}.{sub_lang}.vtt")
-                                        resp = httpx.get(sub['url'], headers={"Referer": "https://vixcloud.co/"}, timeout=5.0)
-                                        if resp.status_code == 200:
-                                            with open(sub_path, "w", encoding="utf-8") as sf:
-                                                sf.write(resp.text)
-                            except Exception:
-                                pass
-                                
-                        futures.append(executor.submit(_export_ep))
-                concurrent.futures.wait(futures)
+                for ep in episodes:
+                    ep_num = ep.get('number', 0)
+                    ep_id = ep['id']
+                    ep_name = safe_filename(ep.get('name', f"Episode {ep_num}"))
+                    
+                    base_name = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}"
+                    strm_path = os.path.join(season_dir, f"{base_name}.strm")
+                    with open(strm_path, "w", encoding="utf-8") as f:
+                        f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
+                        
+                    # Scarica i sottotitoli in modo sequenziale con pausa per evitare ban IP (Cloudflare 1006)
+                    try:
+                        _, subs = scraper.get_stream_url(title_id, ep_id)
+                        if subs:
+                            for sub in subs:
+                                sub_lang = "ita" if "ita" in sub['name'].lower() else "eng" if "eng" in sub['name'].lower() else "un"
+                                if "forced" in sub['name'].lower():
+                                    sub_lang += ".forced"
+                                sub_path = os.path.join(season_dir, f"{base_name}.{sub_lang}.vtt")
+                                resp = httpx.get(sub['url'], headers={"Referer": "https://vixcloud.co/"}, timeout=5.0)
+                                if resp.status_code == 200:
+                                    with open(sub_path, "w", encoding="utf-8") as sf:
+                                        sf.write(resp.text)
+                    except Exception:
+                        pass
+                    
+                    # Pausa obbligatoria per non farsi bloccare da Vixcloud
+                    time.sleep(1.5)
         rprint(f"[green]Successfully exported TV Show: {name}[/green]")
         rprint(f"[dim]Saved to: {shows_dir}[/dim]")
         
