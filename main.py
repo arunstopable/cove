@@ -9,7 +9,6 @@ import httpx
 import ui
 from sc_scraper import SCScraper
 import config
-import time
 import re
 
 def safe_filename(name: str) -> str:
@@ -63,25 +62,6 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                     strm_path = os.path.join(season_dir, f"{base_name}.strm")
                     with open(strm_path, "w", encoding="utf-8") as f:
                         f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
-                        
-                    # Scarica i sottotitoli in modo sequenziale con pausa per evitare ban IP (Cloudflare 1006)
-                    try:
-                        _, subs = scraper.get_stream_url(title_id, ep_id)
-                        if subs:
-                            for sub in subs:
-                                sub_lang = "ita" if "ita" in sub['name'].lower() else "eng" if "eng" in sub['name'].lower() else "un"
-                                if "forced" in sub['name'].lower():
-                                    sub_lang += ".forced"
-                                sub_path = os.path.join(season_dir, f"{base_name}.{sub_lang}.vtt")
-                                resp = httpx.get(sub['url'], headers={"Referer": "https://vixcloud.co/"}, timeout=5.0)
-                                if resp.status_code == 200:
-                                    with open(sub_path, "w", encoding="utf-8") as sf:
-                                        sf.write(resp.text)
-                    except Exception:
-                        pass
-                    
-                    # Pausa obbligatoria per non farsi bloccare da Vixcloud
-                    time.sleep(1.5)
         rprint(f"[green]Successfully exported TV Show: {name}[/green]")
         rprint(f"[dim]Saved to: {shows_dir}[/dim]")
         
@@ -108,22 +88,6 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             strm_path = os.path.join(movies_dir, f"{name}.strm")
             with open(strm_path, "w", encoding="utf-8") as f:
                 f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
-                
-            # Scarica i sottotitoli e salvali accanto al file .strm
-            try:
-                _, subs = scraper.get_stream_url(title_id, ep_id)
-                if subs:
-                    for sub in subs:
-                        sub_lang = "ita" if "ita" in sub['name'].lower() else "eng" if "eng" in sub['name'].lower() else "un"
-                        if "forced" in sub['name'].lower():
-                            sub_lang += ".forced"
-                        sub_path = os.path.join(movies_dir, f"{name}.{sub_lang}.vtt")
-                        resp = httpx.get(sub['url'], headers={"Referer": "https://vixcloud.co/"}, timeout=5.0)
-                        if resp.status_code == 200:
-                            with open(sub_path, "w", encoding="utf-8") as sf:
-                                sf.write(resp.text)
-            except Exception as e:
-                pass
                 
         rprint(f"[green]Successfully exported Movie: {name}[/green]")
         rprint(f"[dim]Saved to: {movies_dir}[/dim]")
