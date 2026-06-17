@@ -7,7 +7,12 @@ load_dotenv()
 # StreamingCommunity
 # ---------------------------------------------------------------------------
 # Anchor page used to discover the active domain
-SC_ANCHOR_URL: str = os.environ.get("SC_ANCHOR_URL", "https://www.streaming-community.co/")
+SC_ANCHOR_URL: str = os.environ.get("SC_ANCHOR_URL", "https://streamingcommunity.buzz/")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Global Constants
+# ──────────────────────────────────────────────────────────────────────────────
+USER_AGENT: str = os.environ.get("USER_AGENT", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 # ---------------------------------------------------------------------------
 # Proxy server (used when generating .strm file URLs)
