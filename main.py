@@ -1,16 +1,14 @@
-"""
-Cove CLI — search, play, and export StreamingCommunity titles.
+"""Cove CLI — Minimalist Apple-inspired streaming hub."""
 
-Usage:
-  python3 main.py          Interactive CLI mode
-"""
-
+import asyncio
 import os
 import re
-import subprocess
 import sys
 from typing import Any, Optional
+import urllib.parse
+import glob
 
+import httpx
 from rich import print as rprint
 
 import config
@@ -18,12 +16,8 @@ import ui
 from sc_scraper import SCScraper
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Utilities
-# ──────────────────────────────────────────────────────────────────────────────
-
 def safe_filename(name: str) -> str:
-    """Strip characters that are illegal in filenames on Windows, macOS, and Linux."""
+    """Make string safe for macOS/Linux file paths."""
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
 
@@ -35,184 +29,212 @@ def _strm_url(title_id: int, episode_id: int) -> str:
     )
 
 
-def _write_strm(path: str, content: str) -> bool:
-    """
-    Write a .strm file.
-    Returns True if written, False if the file already existed (skipped).
-    """
-    if os.path.exists(path):
-        return False
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(content)
-    return True
+# ──────────────────────────────────────────────────────────────────────────────
+# Library Scanner
+# ──────────────────────────────────────────────────────────────────────────────
+
+def scan_library() -> list[dict[str, Any]]:
+    """Scan NFS mounts for .strm files to build a stateless library."""
+    items = []
+    
+    # Scan TV Shows
+    if os.path.exists(config.NFS_SHOWS_PATH):
+        for folder in sorted(os.listdir(config.NFS_SHOWS_PATH)):
+            folder_path = os.path.join(config.NFS_SHOWS_PATH, folder)
+            if not os.path.isdir(folder_path): continue
+            
+            strm_files = glob.glob(os.path.join(folder_path, "**", "*.strm"), recursive=True)
+            if strm_files:
+                # Read the first .strm to extract title_id
+                with open(strm_files[0], "r") as f:
+                    url = f.read().strip()
+                parsed = urllib.parse.urlparse(url)
+                qs = urllib.parse.parse_qs(parsed.query)
+                t_id = qs.get("title_id", [""])[0]
+                if t_id.isdigit():
+                    items.append({"id": int(t_id), "name": folder, "type": "tv", "slug": ""})
+
+    # Scan Movies
+    if os.path.exists(config.NFS_MOVIES_PATH):
+        for folder in sorted(os.listdir(config.NFS_MOVIES_PATH)):
+            folder_path = os.path.join(config.NFS_MOVIES_PATH, folder)
+            if not os.path.isdir(folder_path): continue
+            
+            strm_files = glob.glob(os.path.join(folder_path, "*.strm"))
+            if strm_files:
+                with open(strm_files[0], "r") as f:
+                    url = f.read().strip()
+                parsed = urllib.parse.urlparse(url)
+                qs = urllib.parse.parse_qs(parsed.query)
+                t_id = qs.get("title_id", [""])[0]
+                if t_id.isdigit():
+                    items.append({"id": int(t_id), "name": folder, "type": "movie", "slug": ""})
+                    
+    return items
+
+
+def get_downloaded_ep_nums(show_name: str, season_num: int) -> set[int]:
+    """Scan the season directory for .mkv files and extract episode numbers."""
+    target_dir = os.path.join(config.NFS_SHOWS_PATH, show_name, f"Season {season_num:02d}")
+    if not os.path.exists(target_dir):
+        return set()
+    
+    nums = set()
+    for f in os.listdir(target_dir):
+        if f.endswith(".mkv"):
+            match = re.search(rf"S\d{{2}}E(\d{{2}})", f)
+            if match:
+                nums.add(int(match.group(1)))
+    return nums
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Export
+# Export (.strm)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
-    """Export a title (TV show or movie) as .strm files for Jellyfin."""
     is_tv = sc_title.get("type") == "tv"
     base_dir = config.NFS_SHOWS_PATH if is_tv else config.NFS_MOVIES_PATH
-
-    if not os.path.exists(base_dir):
-        rprint(f"[bold red]Error:[/bold red] NFS volume not mounted at [yellow]'{base_dir}'[/yellow].")
-        rprint("[dim]Please mount your NFS volume and try again.[/dim]")
-        return
-
-    title_id: int = sc_title["id"]
     name = safe_filename(sc_title.get("name", "Unknown"))
+    title_id: int = sc_title["id"]
+    slug: str = sc_title.get("slug", "")
 
     if is_tv:
-        _export_tv_show(scraper, title_id, name, sc_title.get("slug", ""), base_dir)
-    else:
-        _export_movie(scraper, title_id, name, sc_title.get("slug", ""), base_dir)
+        with ui.spinner(f"Fetching details for {name}..."):
+            details = scraper.get_title_details(title_id, slug)
 
+        seasons = details.get("title", {}).get("seasons", [])
+        if not seasons:
+            ui.show_error("No seasons found.")
+            return
 
-def _export_tv_show(
-    scraper: SCScraper,
-    title_id: int,
-    name: str,
-    slug: str,
-    base_dir: str,
-) -> None:
-    shows_dir = os.path.join(base_dir, name)
-    os.makedirs(shows_dir, exist_ok=True)
+        for season in seasons:
+            season_num: int = season.get("number", 1)
+            season_dir = os.path.join(base_dir, name, f"Season {season_num:02d}")
+            os.makedirs(season_dir, exist_ok=True)
 
-    with ui.spinner(f"Fetching details for {name}…"):
-        details = scraper.get_title_details(title_id, slug)
-
-    seasons = details.get("title", {}).get("seasons", [])
-    if not seasons:
-        rprint("[red]No seasons found for this title.[/red]")
-        return
-
-    total_written = 0
-    total_skipped = 0
-
-    for season in seasons:
-        season_num: int = season.get("number", 1)
-        season_dir = os.path.join(shows_dir, f"Season {season_num:02d}")
-        os.makedirs(season_dir, exist_ok=True)
-
-        with ui.spinner(f"Exporting Season {season_num}…"):
             season_data = scraper.get_season_details(title_id, slug, season_num)
+            episodes = season_data.get("loadedSeason", {}).get("episodes", [])
+            for ep in episodes:
+                ep_num: int = ep.get("number", 0)
+                ep_id: Optional[int] = ep.get("id")
+                if not ep_id:
+                    continue
+                ep_name = safe_filename(ep.get("name", f"Episode {ep_num}"))
+                file_name = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.strm"
+                file_path = os.path.join(season_dir, file_name)
 
-        episodes = season_data.get("loadedSeason", {}).get("episodes", [])
+                with open(file_path, "w") as f:
+                    f.write(_strm_url(title_id, ep_id))
 
-        for ep in episodes:
-            ep_num: int = ep.get("number", 0)
-            ep_id: Optional[int] = ep.get("id")
-            if not ep_id:
-                continue
+        ui.show_success(f"Exported {name} to {base_dir}")
 
-            ep_name = safe_filename(ep.get("name", f"Episode {ep_num}"))
-            base_name = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}"
-            strm_path = os.path.join(season_dir, f"{base_name}.strm")
-
-            if _write_strm(strm_path, _strm_url(title_id, ep_id)):
-                total_written += 1
-            else:
-                total_skipped += 1
-
-    rprint(f"\n[bold green]✓ Export complete:[/bold green] [cyan]{name}[/cyan]")
-    rprint(f"  [dim]Path    :[/dim] {shows_dir}")
-    rprint(f"  [dim]Written :[/dim] {total_written} .strm file(s)")
-    if total_skipped:
-        rprint(f"  [dim]Skipped :[/dim] {total_skipped} already existed")
-
-
-def _export_movie(
-    scraper: SCScraper,
-    title_id: int,
-    name: str,
-    slug: str,
-    base_dir: str,
-) -> None:
-    movies_dir = os.path.join(base_dir, name)
-    os.makedirs(movies_dir, exist_ok=True)
-
-    with ui.spinner(f"Fetching details for {name}…"):
-        details = scraper.get_title_details(title_id, slug)
-
-    # Primary location: title.episodes[0].id
-    ep_id: Optional[int] = None
-    episodes_direct = details.get("title", {}).get("episodes", [])
-    if episodes_direct:
-        ep_id = episodes_direct[0].get("id")
-
-    # Fallback: loadedSeason.episodes[0].id
-    if not ep_id:
-        fallback = details.get("loadedSeason", {}).get("episodes", [])
-        if fallback:
-            ep_id = fallback[0].get("id")
-
-    if not ep_id:
-        rprint(f"[red]Could not find episode ID for '[cyan]{name}[/cyan]'. Export skipped.[/red]")
-        return
-
-    strm_path = os.path.join(movies_dir, f"{name}.strm")
-    written = _write_strm(strm_path, _strm_url(title_id, ep_id))
-
-    if written:
-        rprint(f"\n[bold green]✓ Export complete:[/bold green] [cyan]{name}[/cyan]")
-        rprint(f"  [dim]Path:[/dim] {strm_path}")
     else:
-        rprint(f"[yellow]'{name}.strm' already exists — skipped.[/yellow]")
+        with ui.spinner(f"Fetching details for {name}..."):
+            details = scraper.get_title_details(title_id, slug)
+
+        ep_id: Optional[int] = None
+        episodes_direct = details.get("title", {}).get("episodes", [])
+        if episodes_direct:
+            ep_id = episodes_direct[0].get("id")
+        if not ep_id:
+            fallback = details.get("loadedSeason", {}).get("episodes", [])
+            if fallback:
+                ep_id = fallback[0].get("id")
+
+        if not ep_id:
+            ui.show_error(f"Could not find playback ID for {name}.")
+            return
+
+        movie_dir = os.path.join(base_dir, name)
+        os.makedirs(movie_dir, exist_ok=True)
+        file_path = os.path.join(movie_dir, f"{name}.strm")
+
+        with open(file_path, "w") as f:
+            f.write(_strm_url(title_id, ep_id))
+
+        ui.show_success(f"Exported {name} to {movie_dir}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Offline Download & Cleanup
 # ──────────────────────────────────────────────────────────────────────────────
 
-import httpx
-
 def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
-    """Send requests to the proxy server to download the physical MKV files."""
     is_tv = sc_title.get("type") == "tv"
     name = safe_filename(sc_title.get("name", "Unknown"))
     title_id: int = sc_title["id"]
     slug: str = sc_title.get("slug", "")
 
     if is_tv:
-        with ui.spinner(f"Fetching details for {name}…"):
+        with ui.spinner("Fetching details..."):
             details = scraper.get_title_details(title_id, slug)
         
         seasons = details.get("title", {}).get("seasons", [])
         if not seasons:
-            rprint("[red]No seasons found.[/red]")
+            ui.show_error("No seasons found.")
             return
             
+        ui.clear_screen()
+        ui.print_header()
+        ui.show_info(f"Target: {name}")
+        
         scope = ui.select_scope(name, seasons)
         if not scope or scope == "BACK":
             return
             
         target_seasons = seasons if scope == "ALL" else [scope]
-        
         queued = 0
+        
         for season in target_seasons:
             season_num: int = season.get("number", 1)
-            with ui.spinner(f"Queueing Season {season_num}…"):
+            with ui.spinner(f"Loading Season {season_num}..."):
                 season_data = scraper.get_season_details(title_id, slug, season_num)
                 episodes = season_data.get("loadedSeason", {}).get("episodes", [])
                 
-                for ep in episodes:
-                    ep_num: int = ep.get("number", 0)
-                    ep_id: Optional[int] = ep.get("id")
-                    if not ep_id: continue
+            # If a specific season was selected, ask if they want all or specific episodes
+            target_episodes = episodes
+            if scope != "ALL":
+                ui.clear_screen()
+                ui.print_header()
+                dl_choice = questionary.select(
+                    "Download Scope:",
+                    choices=[
+                        questionary.Choice(title="  Download Entire Season", value="ALL"),
+                        questionary.Choice(title="  Select Specific Episodes", value="SPECIFIC"),
+                    ],
+                    style=ui.cove_style,
+                    pointer="❯",
+                    qmark=""
+                ).ask()
+                
+                if dl_choice == "SPECIFIC":
+                    downloaded_nums = get_downloaded_ep_nums(name, season_num)
+                    downloaded_ids = {ep["id"] for ep in episodes if ep.get("number") in downloaded_nums and "id" in ep}
                     
-                    ep_name = safe_filename(ep.get("name", f"Episode {ep_num}"))
-                    rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
-                    if _queue_download(title_id, ep_id, "tv", rel_path):
-                        queued += 1
+                    target_episodes = ui.select_episodes_multi(episodes, downloaded_ids)
+                    if not target_episodes:
+                        return
                         
-        rprint(f"\n[bold green]✓ Queued {queued} episodes for background download on the server![/bold green]")
+            # Queue them
+            for ep in target_episodes:
+                ep_num: int = ep.get("number", 0)
+                ep_id: Optional[int] = ep.get("id")
+                if not ep_id: continue
+                
+                ep_name = safe_filename(ep.get("name", f"Episode {ep_num}"))
+                rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
+                if _queue_download(title_id, ep_id, "tv", rel_path):
+                    queued += 1
+                        
+        if queued > 0:
+            ui.show_success(f"Queued {queued} episode(s) to the server.")
         
     else:
         # Movie
-        with ui.spinner(f"Fetching details for {name}…"):
+        with ui.spinner("Fetching details..."):
             details = scraper.get_title_details(title_id, slug)
+            
         ep_id: Optional[int] = None
         episodes_direct = details.get("title", {}).get("episodes", [])
         if episodes_direct: ep_id = episodes_direct[0].get("id")
@@ -221,13 +243,12 @@ def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             if fallback: ep_id = fallback[0].get("id")
             
         if not ep_id:
-            rprint(f"[red]Could not find episode ID for '[cyan]{name}[/cyan]'.[/red]")
+            ui.show_error("Could not find playback ID.")
             return
             
         rel_path = f"{name}/{name}.mkv"
-        with ui.spinner(f"Queueing {name}…"):
-            if _queue_download(title_id, ep_id, "movie", rel_path):
-                rprint(f"\n[bold green]✓ Queued movie for background download on the server![/bold green]")
+        if _queue_download(title_id, ep_id, "movie", rel_path):
+            ui.show_success("Queued movie for background download.")
 
 
 def _queue_download(title_id: int, episode_id: int, media_type: str, relative_path: str) -> bool:
@@ -242,37 +263,37 @@ def _queue_download(title_id: int, episode_id: int, media_type: str, relative_pa
         r = httpx.post(url, json=payload, timeout=5.0)
         if r.status_code == 200:
             return True
-        rprint(f"[red]Server returned error: {r.text}[/red]")
+        ui.show_error(f"Server returned error: {r.status_code}")
         return False
     except Exception as e:
-        rprint(f"[red]Failed to contact proxy server: {e}[/red]")
+        ui.show_error(f"Failed to contact proxy server: {e}")
         return False
 
 
-import glob
-
 def cleanup_offline(sc_title: dict[str, Any]) -> None:
-    """Delete physical MKV files from the local NFS mount to free space."""
     is_tv = sc_title.get("type") == "tv"
     base_dir = config.NFS_SHOWS_PATH if is_tv else config.NFS_MOVIES_PATH
     name = safe_filename(sc_title.get("name", "Unknown"))
-    
     target_dir = os.path.join(base_dir, name)
+    
     if not os.path.exists(target_dir):
-        rprint(f"[yellow]Directory not found: {target_dir}[/yellow]")
+        ui.show_error("Directory not found.")
         return
 
     if is_tv:
-        # Ask which season to clean
-        import ui
         seasons_dirs = sorted(glob.glob(os.path.join(target_dir, "Season *")))
         if not seasons_dirs:
-            rprint("[yellow]No seasons found.[/yellow]")
+            ui.show_info("No seasons found.")
             return
             
         choices = ["ALL"] + [os.path.basename(d) for d in seasons_dirs]
-        import questionary
-        scope = questionary.select(f"Which season of {name} to cleanup?", choices=choices + ["BACK"]).ask()
+        scope = questionary.select(
+            "Target Season:", 
+            choices=choices + ["BACK"],
+            style=ui.cove_style,
+            qmark="",
+            pointer="❯"
+        ).ask()
         if not scope or scope == "BACK": return
         
         search_path = os.path.join(target_dir, "**", "*.mkv") if scope == "ALL" else os.path.join(target_dir, scope, "*.mkv")
@@ -281,23 +302,30 @@ def cleanup_offline(sc_title: dict[str, Any]) -> None:
 
     mkv_files = glob.glob(search_path, recursive=True)
     if not mkv_files:
-        rprint("[yellow]No .mkv files found to delete.[/yellow]")
+        ui.show_info("No downloaded .mkv files found here.")
         return
         
-    confirm = questionary.confirm(f"Are you sure you want to delete {len(mkv_files)} .mkv file(s)? (.strm will be kept)").ask()
+    confirm = questionary.confirm(
+        f"Delete {len(mkv_files)} physical .mkv file(s)? (.strm will be kept)",
+        style=ui.cove_style,
+        qmark=""
+    ).ask()
+    
     if confirm:
         deleted = 0
         for f in mkv_files:
             try:
                 os.remove(f)
                 deleted += 1
-            except Exception as e:
-                rprint(f"[red]Failed to delete {f}: {e}[/red]")
-        rprint(f"[bold green]✓ Deleted {deleted} file(s).[/bold green]")
+            except Exception:
+                pass
+        ui.show_success(f"Deleted {deleted} file(s).")
 
 
 def show_download_status() -> None:
-    """Fetch and display the current download status from the proxy server."""
+    ui.clear_screen()
+    ui.print_header()
+    
     url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/status"
     try:
         r = httpx.get(url, timeout=3.0)
@@ -306,134 +334,95 @@ def show_download_status() -> None:
             queue_size = data.get("queue_size", 0)
             current = data.get("current", {})
             
-            rprint("\n[bold cyan]── Download Status ──[/bold cyan]")
+            from rich.panel import Panel
+            from rich.text import Text
+            
+            lines = []
             if current.get("active"):
-                rel_path = current.get("relative_path", "Unknown")
-                mb = current.get("downloaded_mb", 0)
-                rprint(f"[bold green]▶ Downloading:[/bold green] {rel_path}")
-                rprint(f"   [yellow]Progress:[/yellow] {mb} MB downloaded")
+                lines.append(f"[bold {ui.APPLE_BLUE}]Active Download:[/]")
+                lines.append(f"  {current.get('relative_path', 'Unknown')}")
+                lines.append(f"  [dim]Progress:[/] {current.get('downloaded_mb', 0)} MB")
             else:
-                rprint("[yellow]No active downloads.[/yellow]")
+                lines.append("[dim]No active downloads.[/]")
                 
-            rprint(f"[cyan]Episodes in queue:[/cyan] {queue_size}\n")
+            lines.append("")
+            lines.append(f"Queue Size: {queue_size}")
+            
+            ui.console.print(Panel("\n".join(lines), title="Status", border_style=ui.BORDER_GRAY, padding=(1, 2)))
         else:
-            rprint(f"[red]Server returned error: {r.status_code}[/red]")
+            ui.show_error(f"Server returned error: {r.status_code}")
     except Exception as e:
-        rprint(f"[red]Failed to contact proxy server: {e}[/red]")
+        ui.show_error(f"Failed to contact proxy: {e}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Playback
 # ──────────────────────────────────────────────────────────────────────────────
 
-def play_stream(m3u8_url: str) -> None:
-    """Launch the configured local player with the given HLS stream URL."""
-    player = config.PLAYER_APP
-    rprint(f"\n[bold green]Launching {player}…[/bold green]")
-
-    ua = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
-    vix_referer = "Referer: https://vixcloud.co/"
-
-    try:
-        if player == "IINA":
-            cmd = [
-                "open", "-a", "IINA",
-                "--args",
-                m3u8_url,
-                f"--mpv-user-agent={ua}",
-                f"--mpv-http-header-fields={vix_referer}",
-                "--mpv-slang=ita,it,en",
-            ]
-        elif player == "VLC":
-            cmd = [
-                "open", "-a", "VLC",
-                "--args",
-                "--http-referrer=https://vixcloud.co/",
-                m3u8_url,
-            ]
-        elif player == "mpv":
-            cmd = [
-                "mpv",
-                f"--user-agent={ua}",
-                "--referrer=https://vixcloud.co/",
-                "--slang=ita,en",
-                m3u8_url,
-            ]
-        else:
-            rprint(f"[yellow]Unknown player '{player}'. Falling back to IINA.[/yellow]")
-            cmd = ["open", "-a", "IINA", "--args", m3u8_url, f"--mpv-user-agent={ua}"]
-
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    except FileNotFoundError:
-        rprint(f"[bold red]{player} not found.[/bold red] Check PLAYER_APP in your .env file.")
-    except Exception as exc:
-        rprint(f"[bold red]Failed to launch {player}: {exc}[/bold red]")
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Title handlers
-# ──────────────────────────────────────────────────────────────────────────────
-
 def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
-    """Interactive season → episode → play flow for a TV show."""
-    with ui.spinner("Fetching show details…"):
-        details = scraper.get_title_details(sc_title["id"], sc_title.get("slug", ""))
+    title_id: int = sc_title["id"]
+    slug: str = sc_title.get("slug", "")
+    name = sc_title.get("name", "Unknown")
 
-    if not details:
-        rprint("[red]Could not fetch show details.[/red]")
-        return
+    with ui.spinner("Fetching seasons..."):
+        details = scraper.get_title_details(title_id, slug)
 
     seasons = details.get("title", {}).get("seasons", [])
     if not seasons:
-        rprint("[red]No seasons found.[/red]")
+        ui.show_error("No seasons found.")
         return
 
-    while True:
-        season = ui.select_season(seasons)
-        if not season or season == "BACK":
-            break
-        if not isinstance(season, dict):
-            continue
+    ui.clear_screen()
+    ui.print_header()
+    ui.show_info(f"Show: {name}")
+    season = ui.select_season(seasons)
+    if not season or season == "BACK":
+        return
 
-        season_num: int = season.get("number", 1)
+    season_num: int = season.get("number", 1)
+    with ui.spinner("Fetching episodes..."):
+        season_data = scraper.get_season_details(title_id, slug, season_num)
 
-        with ui.spinner(f"Fetching Season {season_num} episodes…"):
-            season_data = scraper.get_season_details(
-                sc_title["id"], sc_title.get("slug", ""), season_num
-            )
+    episodes = season_data.get("loadedSeason", {}).get("episodes", [])
+    if not episodes:
+        ui.show_error("No episodes found.")
+        return
 
-        episodes = season_data.get("loadedSeason", {}).get("episodes", [])
-        if not episodes:
-            rprint(f"[red]No episodes found for Season {season_num}.[/red]")
-            continue
+    downloaded_nums = get_downloaded_ep_nums(safe_filename(name), season_num)
+    downloaded_ids = {ep["id"] for ep in episodes if ep.get("number") in downloaded_nums and "id" in ep}
 
-        while True:
-            episode = ui.select_episode(episodes)
-            if not episode or episode == "BACK":
-                break
-            if not isinstance(episode, dict):
-                continue
+    ui.clear_screen()
+    ui.print_header()
+    ui.show_info(f"Show: {name} (Season {season_num})")
+    episode = ui.select_episode(episodes, downloaded_ids)
+    if not episode or episode == "BACK":
+        return
 
-            with ui.spinner("Extracting stream URL…"):
-                m3u8_url = scraper.get_stream_url(sc_title["id"], episode["id"])
+    ep_id: int = episode.get("id", 0)
+    strm_url = _strm_url(title_id, ep_id)
 
-            if m3u8_url:
-                play_stream(m3u8_url)
-            else:
-                rprint(
-                    "[bold red]Stream extraction failed.[/bold red] "
-                    "[dim]The source may have changed.[/dim]"
-                )
+    ui.show_info(f"Opening local player ({config.PLAYER})...")
+    
+    import subprocess
+    if config.PLAYER.lower() == "iina":
+        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", strm_url]
+    elif config.PLAYER.lower() == "vlc":
+        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", strm_url]
+    else:
+        cmd = [config.PLAYER, strm_url]
+
+    try:
+        subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        ui.show_error(f"Player executable not found: {config.PLAYER}")
 
 
 def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
-    """Extract stream URL and play for a movie title."""
-    with ui.spinner("Fetching movie details…"):
-        details = scraper.get_title_details(sc_title["id"], sc_title.get("slug", ""))
+    title_id: int = sc_title["id"]
+    slug: str = sc_title.get("slug", "")
+
+    with ui.spinner("Fetching metadata..."):
+        details = scraper.get_title_details(title_id, slug)
 
     ep_id: Optional[int] = None
     episodes_direct = details.get("title", {}).get("episodes", [])
@@ -445,85 +434,116 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             ep_id = fallback[0].get("id")
 
     if not ep_id:
-        rprint("[bold red]Could not find episode ID for this movie.[/bold red]")
+        ui.show_error("Could not find playback ID.")
         return
 
-    with ui.spinner("Extracting stream URL…"):
-        m3u8_url = scraper.get_stream_url(sc_title["id"], ep_id)
+    strm_url = _strm_url(title_id, ep_id)
+    ui.show_info(f"Opening local player ({config.PLAYER})...")
 
-    if m3u8_url:
-        play_stream(m3u8_url)
+    import subprocess
+    if config.PLAYER.lower() == "iina":
+        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", strm_url]
+    elif config.PLAYER.lower() == "vlc":
+        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", strm_url]
     else:
-        rprint("[bold red]Stream extraction failed for this movie.[/bold red]")
+        cmd = [config.PLAYER, strm_url]
+
+    try:
+        subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        ui.show_error(f"Player executable not found: {config.PLAYER}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Main loop
+# Entrypoint
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    os.system("clear")
-    ui.print_header()
-
     scraper = SCScraper()
+    scraper.init_session()
 
-    with ui.spinner("Initializing engine…"):
-        scraper.init_session()
+    try:
+        while True:
+            ui.clear_screen()
+            ui.print_header()
 
-    if not scraper.active_domain:
-        rprint("[bold red]Failed to resolve streaming domain.[/bold red]")
-        rprint("[dim]Check your internet connection and SC_ANCHOR_URL in .env.[/dim]")
-        sys.exit(1)
+            main_action = ui.select_main_menu()
+            if not main_action or main_action == "EXIT":
+                ui.show_info("Goodbye.")
+                break
+                
+            if main_action == "STATUS":
+                show_download_status()
+                input("\nPress Enter to return...")
+                continue
+                
+            selected = None
+            
+            if main_action == "LIBRARY":
+                ui.clear_screen()
+                ui.print_header()
+                with ui.spinner("Scanning library..."):
+                    library_items = scan_library()
+                if not library_items:
+                    ui.show_info("Your library is empty. Export some titles first.")
+                    input("\nPress Enter to return...")
+                    continue
+                    
+                selected = ui.select_library_item(library_items)
+                
+            elif main_action == "SEARCH":
+                query = ui.ask_search_query()
+                if not query:
+                    continue
 
-    rprint(f"[dim]Domain: {scraper.active_domain}[/dim]\n")
+                with ui.spinner("Searching..."):
+                    results = scraper.search(query)
 
-    import questionary  # local import to keep top-level imports clean
+                if not results:
+                    ui.show_error("No results found.")
+                    input("\nPress Enter to return...")
+                    continue
 
-    while True:
-        try:
-            query: Optional[str] = questionary.text("Search title (or press Enter to exit):").ask()
-        except (KeyboardInterrupt, EOFError):
-            break
+                ui.clear_screen()
+                ui.print_header()
+                selected = ui.select_sc_search_result(results)
 
-        if not query or not query.strip():
-            break
+            if not selected or selected == "BACK":
+                continue
 
-        query = query.strip()
+            # Title selected -> Action menu
+            while True:
+                ui.clear_screen()
+                ui.print_header()
+                
+                name = selected.get("name", "Unknown")
+                kind = "TV" if selected.get("type") == "tv" else "Movie"
+                ui.show_info(f"Selected: {name} ({kind})")
 
-        with ui.spinner(f"Searching for '{query}'…"):
-            results = scraper.search(query)
+                action = ui.select_action()
+                if not action or action == "BACK":
+                    break
 
-        if not results:
-            rprint("[yellow]No results found. Try a different query.[/yellow]")
-            continue
+                if action == "EXPORT":
+                    export_media(scraper, selected)
+                    input("\nPress Enter to continue...")
+                elif action == "DOWNLOAD":
+                    download_offline(scraper, selected)
+                    input("\nPress Enter to continue...")
+                elif action == "CLEANUP":
+                    cleanup_offline(selected)
+                    input("\nPress Enter to continue...")
+                elif action == "PLAY":
+                    if selected.get("type") == "tv":
+                        handle_tv_show(scraper, selected)
+                    else:
+                        handle_movie(scraper, selected)
 
-        selected = ui.select_sc_search_result(results)
-        if not selected or selected == "BACK" or not isinstance(selected, dict):
-            continue
-
-        action = ui.select_action()
-        if not action or action == "BACK":
-            continue
-
-        if action == "EXPORT":
-            export_media(scraper, selected)
-        elif action == "DOWNLOAD":
-            download_offline(scraper, selected)
-        elif action == "STATUS":
-            show_download_status()
-            input("\nPress Enter to continue...")
-        elif action == "CLEANUP":
-            cleanup_offline(selected)
-        elif action == "PLAY":
-            if selected.get("type") == "tv":
-                handle_tv_show(scraper, selected)
-            else:
-                handle_movie(scraper, selected)
+    except KeyboardInterrupt:
+        ui.console.print("\n[dim]Aborted by user.[/]")
+    finally:
+        scraper.close()
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        rprint("\n[dim]Goodbye![/dim]")
-        sys.exit(0)
+    main()
