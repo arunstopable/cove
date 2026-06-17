@@ -32,11 +32,11 @@ def play_stream(request: Request, title_id: int, episode_id: int):
     Fetches the master M3U8 URL and returns the modified M3U8 text.
     """
     try:
-        m3u8_url, _ = scraper.get_stream_url(title_id, episode_id)
+        m3u8_url = scraper.get_stream_url(title_id, episode_id)
         if not m3u8_url:
             print("Failed to get stream, re-initializing session and retrying...")
             scraper.init_session()
-            m3u8_url, _ = scraper.get_stream_url(title_id, episode_id)
+            m3u8_url = scraper.get_stream_url(title_id, episode_id)
             
         if not m3u8_url:
             raise HTTPException(status_code=404, detail="Stream not found or extraction failed")
@@ -89,7 +89,17 @@ def proxy_child(request: Request, url: str):
             # Rewrite enc.key URI if it exists
             m3u8_text = m3u8_text.replace('URI="/storage/enc.key"', 'URI="https://vixcloud.co/storage/enc.key"')
             
-            return Response(content=m3u8_text, media_type="application/vnd.apple.mpegurl")
+            # Rewrite relative URLs to absolute URLs
+            base_url = url.rsplit("/", 1)[0]
+            lines = m3u8_text.splitlines()
+            modified_lines = []
+            for line in lines:
+                if line and not line.startswith("#"):
+                    if not line.startswith("http"):
+                        line = f"{base_url}/{line}"
+                modified_lines.append(line)
+            
+            return Response(content="\n".join(modified_lines), media_type="application/vnd.apple.mpegurl")
     except Exception as e:
         print(f"Error proxying child m3u8: {e}")
         raise HTTPException(status_code=500, detail=str(e))
