@@ -323,7 +323,7 @@ class SCScraper:
 
             # ── Step 3: assemble M3U8 URL ────────────────────────────────
             master_m3u8 = (
-                f"{playlist_url}?ub=1&token={token}&expires={expires}&h=1"
+                f"{playlist_url}?ub=1&token={token}&expires={expires}"
             )
 
             if config.DEBUG:
