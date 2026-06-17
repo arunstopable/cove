@@ -97,12 +97,14 @@ async def download_worker() -> None:
                 
             log.info(f"[DOWNLOAD] Starting ffmpeg to {part_path}")
             
+            # Use the local proxy so ffmpeg benefits from the quality filtering
+            proxy_url = f"http://127.0.0.1:8000/play.m3u8?title_id={title_id}&episode_id={episode_id}"
+            
             ffmpeg_cmd = [
                 "ffmpeg", "-y", "-v", "error", 
                 "-allowed_extensions", "ALL", 
                 "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-                "-headers", f"Referer: {VIXCLOUD_REFERER}\r\nUser-Agent: {config.USER_AGENT}\r\n",
-                "-i", m3u8_url,
+                "-i", proxy_url,
                 "-map", "0:v:0", "-map", "0:a", "-map", "0:s?",
                 "-c:v", "copy", "-c:a", "aac", "-c:s", "copy",
                 "-f", "matroska", part_path
@@ -367,22 +369,45 @@ def _rewrite_master_m3u8(m3u8_text: str, proxy_base: str) -> str:
       • URI="…" attributes inside tag lines (#EXT-X-MEDIA, #EXT-X-I-FRAME-STREAM-INF …)
     """
     lines = m3u8_text.splitlines()
-    out: list[str] = []
-
+    out_headers: list[str] = []
+    streams: list[dict[str, Any]] = []
+    
+    current_stream_tag = None
+    
     for line in lines:
         stripped = line.strip()
 
         if not stripped:
-            out.append(line)
+            continue
+            
+        if stripped.startswith("#EXT-X-STREAM-INF"):
+            current_stream_tag = line
+            continue
+            
+        if current_stream_tag:
+            # We found a URL following a stream tag
+            res_match = re.search(r'RESOLUTION=\d+x(\d+)', current_stream_tag)
+            height = int(res_match.group(1)) if res_match else 0
+            bw_match = re.search(r'BANDWIDTH=(\d+)', current_stream_tag)
+            bw = int(bw_match.group(1)) if bw_match else 0
+            
+            # Rewrite URL to proxy child
+            if stripped.startswith("http"):
+                encoded = urllib.parse.quote(stripped, safe="")
+                rewritten_url = f"{proxy_base}/proxy_child.m3u8?url={encoded}"
+            else:
+                rewritten_url = stripped
+                
+            streams.append({
+                'tag': current_stream_tag,
+                'url': rewritten_url,
+                'height': height,
+                'bw': bw
+            })
+            current_stream_tag = None
             continue
 
-        # ── Bare absolute URL → proxy child ──────────────────────────────────
-        if stripped.startswith("http"):
-            encoded = urllib.parse.quote(stripped, safe="")
-            out.append(f"{proxy_base}/proxy_child.m3u8?url={encoded}")
-            continue
-
-        # ── URI="" attribute inside a tag line ────────────────────────────────
+        # ── URI="" attribute inside a header/media tag line ──────────────────
         if stripped.startswith("#") and 'URI="' in stripped:
             def _replace_uri(match: re.Match) -> str:  # noqa: E306
                 original = match.group(1)
@@ -391,9 +416,18 @@ def _rewrite_master_m3u8(m3u8_text: str, proxy_base: str) -> str:
 
             line = re.sub(r'URI="([^"]+)"', _replace_uri, line)
 
-        out.append(line)
+        out_headers.append(line)
 
-    return "\n".join(out)
+    # Sort streams by height descending, then bandwidth descending
+    streams.sort(key=lambda s: (s['height'], s['bw']), reverse=True)
+    
+    # We only keep the best stream to force highest quality available (e.g. 1080p or 720p)
+    if streams:
+        best_stream = streams[0]
+        out_headers.append(best_stream['tag'])
+        out_headers.append(best_stream['url'])
+
+    return "\n".join(out_headers)
 
 
 def _rewrite_child_m3u8(m3u8_text: str, segment_base: str, proxy_base: str) -> str:
