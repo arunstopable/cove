@@ -412,20 +412,20 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     ep_id: int = episode.get("id", 0)
     strm_url = _strm_url(title_id, ep_id)
 
-    ui.show_info(f"Opening local player ({config.PLAYER})...")
+    ui.show_info(f"Opening local player ({config.PLAYER_APP})...")
     
     import subprocess
-    if config.PLAYER.lower() == "iina":
+    if config.PLAYER_APP.lower() == "iina":
         cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", strm_url]
-    elif config.PLAYER.lower() == "vlc":
+    elif config.PLAYER_APP.lower() == "vlc":
         cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", strm_url]
     else:
-        cmd = [config.PLAYER, strm_url]
+        cmd = [config.PLAYER_APP, strm_url]
 
     try:
         subprocess.run(cmd, check=False)
     except FileNotFoundError:
-        ui.show_error(f"Player executable not found: {config.PLAYER}")
+        ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
 
 
 def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
@@ -449,20 +449,20 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         return
 
     strm_url = _strm_url(title_id, ep_id)
-    ui.show_info(f"Opening local player ({config.PLAYER})...")
+    ui.show_info(f"Opening local player ({config.PLAYER_APP})...")
 
     import subprocess
-    if config.PLAYER.lower() == "iina":
+    if config.PLAYER_APP.lower() == "iina":
         cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", strm_url]
-    elif config.PLAYER.lower() == "vlc":
+    elif config.PLAYER_APP.lower() == "vlc":
         cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", strm_url]
     else:
-        cmd = [config.PLAYER, strm_url]
+        cmd = [config.PLAYER_APP, strm_url]
 
     try:
         subprocess.run(cmd, check=False)
     except FileNotFoundError:
-        ui.show_error(f"Player executable not found: {config.PLAYER}")
+        ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
