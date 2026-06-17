@@ -59,7 +59,10 @@ def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, An
     choices = []
     for r in results:
         title = r.get('name', 'Unknown')
-        media_type = "TV" if r.get('type') == 'tv' else "Movie"
+        if r.get('type') == 'tv':
+            media_type = "[green]show[/green]"
+        else:
+            media_type = "[blue]movie[/blue]"
         choices.append(questionary.Choice(title=f"{title} [{media_type}]", value=r))
         
     return questionary.select(
