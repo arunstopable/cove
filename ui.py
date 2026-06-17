@@ -54,16 +54,15 @@ def select_media(media_list: list[dict[str, Any]]) -> Union[dict[str, Any], str,
         "Select a title:",
         choices=_add_back_option(choices),
     ).ask()
-
 def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
     choices = []
     for r in results:
         title = r.get('name', 'Unknown')
         if r.get('type') == 'tv':
-            media_type = "[green]show[/green]"
+            tag = "🟢"
         else:
-            media_type = "[blue]movie[/blue]"
-        choices.append(questionary.Choice(title=f"{title} [{media_type}]", value=r))
+            tag = "🔵"
+        choices.append(questionary.Choice(title=f"{tag} {title}", value=r))
         
     return questionary.select(
         "Select a search result:",
