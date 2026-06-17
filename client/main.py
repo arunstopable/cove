@@ -408,70 +408,73 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         ui.show_error("No seasons found.")
         return
 
-    ui.clear_screen()
-    ui.print_header()
-    ui.show_info(f"Show: {name}")
-    season = ui.select_season(seasons)
-    if not season or season == "BACK":
-        return
+    while True:
+        ui.clear_screen()
+        ui.print_header()
+        ui.show_info(f"Show: {name}")
+        season = ui.select_season(seasons)
+        if not season or season == "BACK":
+            break
 
-    season_num: int = season.get("number", 1)
-    with ui.spinner("Fetching episodes..."):
-        season_data = scraper.get_season_details(title_id, slug, season_num)
+        season_num: int = season.get("number", 1)
+        with ui.spinner("Fetching episodes..."):
+            season_data = scraper.get_season_details(title_id, slug, season_num)
 
-    episodes = season_data.get("loadedSeason", {}).get("episodes", [])
-    if not episodes:
-        ui.show_error("No episodes found.")
-        return
+        episodes = season_data.get("loadedSeason", {}).get("episodes", [])
+        if not episodes:
+            ui.show_error("No episodes found.")
+            input("\nPress Enter to return...")
+            continue
 
-    downloaded_nums = get_downloaded_ep_nums(safe_filename(name), season_num)
-    downloaded_ids = {ep["id"] for ep in episodes if ep.get("number") in downloaded_nums and "id" in ep}
+        while True:
+            downloaded_nums = get_downloaded_ep_nums(safe_filename(name), season_num)
+            downloaded_ids = {ep["id"] for ep in episodes if ep.get("number") in downloaded_nums and "id" in ep}
 
-    ui.clear_screen()
-    ui.print_header()
-    ui.show_info(f"Show: {name} (Season {season_num})")
-    episode = ui.select_episode(episodes, downloaded_ids)
-    if not episode or episode == "BACK":
-        return
+            ui.clear_screen()
+            ui.print_header()
+            ui.show_info(f"Show: {name} (Season {season_num})")
+            episode = ui.select_episode(episodes, downloaded_ids)
+            if not episode or episode == "BACK":
+                break
 
-    ep_id: int = episode.get("id", 0)
-    ep_num: int = episode.get("number", 0)
-    
-    if ep_num in downloaded_nums:
-        ep_name = safe_filename(episode.get("name", f"Episode {ep_num}"))
-        rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
-        play_target = os.path.join(config.NFS_SHOWS_PATH, rel_path)
-        ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
-        
-        import subprocess
-        if config.PLAYER_APP.lower() == "iina":
-            cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
-        elif config.PLAYER_APP.lower() == "vlc":
-            cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
-        else:
-            cmd = [config.PLAYER_APP, play_target]
-
-        try:
-            subprocess.run(cmd, check=False)
-        except FileNotFoundError:
-            ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
-    else:
-        with local_proxy() as base_url:
-            play_target = _strm_url(base_url, title_id, ep_id)
-            ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
+            ep_id: int = episode.get("id", 0)
+            ep_num: int = episode.get("number", 0)
             
-            import subprocess
-            if config.PLAYER_APP.lower() == "iina":
-                cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
-            elif config.PLAYER_APP.lower() == "vlc":
-                cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
-            else:
-                cmd = [config.PLAYER_APP, play_target]
+            if ep_num in downloaded_nums:
+                ep_name = safe_filename(episode.get("name", f"Episode {ep_num}"))
+                rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
+                play_target = os.path.join(config.NFS_SHOWS_PATH, rel_path)
+                ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
+                
+                import subprocess
+                if config.PLAYER_APP.lower() == "iina":
+                    cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
+                elif config.PLAYER_APP.lower() == "vlc":
+                    cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+                else:
+                    cmd = [config.PLAYER_APP, play_target]
 
-            try:
-                subprocess.run(cmd, check=False)
-            except FileNotFoundError:
-                ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
+                try:
+                    subprocess.run(cmd, check=False)
+                except FileNotFoundError:
+                    ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
+            else:
+                with local_proxy() as base_url:
+                    play_target = _strm_url(base_url, title_id, ep_id)
+                    ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
+                    
+                    import subprocess
+                    if config.PLAYER_APP.lower() == "iina":
+                        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
+                    elif config.PLAYER_APP.lower() == "vlc":
+                        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+                    else:
+                        cmd = [config.PLAYER_APP, play_target]
+
+                    try:
+                        subprocess.run(cmd, check=False)
+                    except FileNotFoundError:
+                        ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
 
 
 def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
