@@ -17,44 +17,10 @@ def show_spinner(task_msg: str) -> Progress:
         transient=True
     )
 
-def select_action(is_logged_in: bool) -> Optional[str]:
-    choices = []
-    if is_logged_in:
-        choices.append("My List (Watching)")
-        choices.append("Search")
-        choices.append("Logout from Kino")
-    else:
-        choices.append("Search")
-        choices.append("Login to Kino")
-    choices.append("Exit")
-
-    return questionary.select(
-        "What do you want to do?",
-        choices=choices,
-        style=questionary.Style([
-            ('qmark', 'fg:#00ffff bold'),
-            ('question', 'bold'),
-            ('answer', 'fg:#00ffff bold'),
-            ('pointer', 'fg:#00ffff bold'),
-            ('highlighted', 'fg:#00ffff bold'),
-        ])
-    ).ask()
-
 def _add_back_option(choices: list[Any]) -> list[Any]:
     choices.append(questionary.Choice(title="[Back]", value="BACK"))
     return choices
 
-def select_media(media_list: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
-    """Select a media from the watching list"""
-    choices = []
-    for item in media_list:
-        title = item.get("title", f"TMDB ID: {item.get('tmdb_id', 'Unknown')}")
-        choices.append(questionary.Choice(title=title, value=item))
-    
-    return questionary.select(
-        "Select a title:",
-        choices=_add_back_option(choices),
-    ).ask()
 def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
     choices = []
     for r in results:

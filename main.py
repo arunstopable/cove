@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 import httpx
 import ui
-import db_client
 from sc_scraper import SCScraper
 
 import concurrent.futures
@@ -150,109 +149,27 @@ def main() -> None:
     rprint(f"[dim]Active domain: {scraper.active_domain}[/dim]\n")
 
     while True:
-        logged_in = db_client.is_logged_in()
-        action = ui.select_action(logged_in)
-        
-        if action == "Exit" or action is None:
+        query = questionary.text("Enter title to search (or empty to exit):").ask()
+        if not query:
             break
             
-        elif action == "Login to Kino":
-            email = questionary.text("Email:").ask()
-            if not email: continue
-            password = questionary.password("Password:").ask()
-            if not password: continue
+        with ui.show_spinner(f"Searching for '{query}'...") as progress:
+            task = progress.add_task("Searching", total=None)
+            results = scraper.search(query)
             
-            with ui.show_spinner("Logging in...") as progress:
-                task = progress.add_task("Login", total=None)
-                success, msg = db_client.login(email, password)
-            if success:
-                rprint("[bold green]Successfully logged in![/bold green]")
-            else:
-                rprint(f"[bold red]Login failed: {msg}[/bold red]")
-                
-        elif action == "Logout from Kino":
-            db_client.clear_session()
-            rprint("[bold yellow]Logged out successfully.[/bold yellow]")
+        if not results:
+            rprint("[red]No results found.[/red]")
+            continue
             
-        elif action == "My List (Watching)":
-            with ui.show_spinner("Fetching your list from Kino...") as progress:
-                task = progress.add_task("Fetching", total=None)
-                my_list = db_client.get_watching_list()
-                
-            if not my_list:
-                rprint("[yellow]Your watching list is empty or could not be fetched.[/yellow]")
-                continue
-                
-            # Fetch TMDB details to show proper titles
-            for item in my_list:
-                if 'title' not in item or not item['title']:
-                    tmdb_data = db_client.fetch_tmdb_details(item.get('tmdb_id', 0), item.get('media_type', ''))
-                    if tmdb_data:
-                        item['title'] = tmdb_data['title']
-                    else:
-                        item['title'] = f"Unknown ({item.get('tmdb_id')})"
-                        
-            while True:
-                selected_item = ui.select_media(my_list)
-                if not selected_item or selected_item == "BACK":
-                    break
-                    
-                if isinstance(selected_item, dict):
-                    title_to_search = selected_item.get('title', '')
-                    with ui.show_spinner(f"Searching SC for '{title_to_search}'...") as progress:
-                        task = progress.add_task("Searching", total=None)
-                        results = scraper.search(title_to_search)
-                        
-                    if not results:
-                        rprint(f"[red]No matches found for '{title_to_search}'.[/red]")
-                        continue
-                        
-                    sc_title: Optional[dict[str, Any]] = None
-                    if len(results) == 1:
-                        sc_title = results[0]
-                    else:
-                        # Let user disambiguate
-                        selected_res = ui.select_sc_search_result(results)
-                        if isinstance(selected_res, dict):
-                            sc_title = selected_res
-                        else:
-                            sc_title = None
-                        
-                    if not sc_title or sc_title == "BACK":
-                        continue
-                        
-                    if selected_item.get('media_type') == 'tv':
-                        # Fetch progress
-                        with ui.show_spinner("Fetching progress from Kino...") as progress:
-                            task = progress.add_task("Fetching progress", total=None)
-                            watched_episodes = db_client.get_watched_episodes(selected_item.get('tmdb_id', 0))
-                            
-                        handle_tv_show(scraper, sc_title, watched_episodes)
-                    else:
-                        handle_movie(scraper, sc_title)
-                            
-        elif action == "Search":
-            query = questionary.text("Enter title to search:").ask()
-            if not query:
-                continue
-                
-            with ui.show_spinner(f"Searching for '{query}'...") as progress:
-                task = progress.add_task("Searching", total=None)
-                results = scraper.search(query)
-                
-            if not results:
-                rprint("[red]No results found.[/red]")
-                continue
-                
-            selected_res = ui.select_sc_search_result(results)
-            if not selected_res or selected_res == "BACK" or not isinstance(selected_res, dict):
-                continue
-                
-            sc_title_search = selected_res
-            if sc_title_search.get('type') == 'tv':
-                handle_tv_show(scraper, sc_title_search, set())
-            else:
-                handle_movie(scraper, sc_title_search)
+        selected_res = ui.select_sc_search_result(results)
+        if not selected_res or selected_res == "BACK" or not isinstance(selected_res, dict):
+            continue
+            
+        sc_title_search = selected_res
+        if sc_title_search.get('type') == 'tv':
+            handle_tv_show(scraper, sc_title_search, set())
+        else:
+            handle_movie(scraper, sc_title_search)
 
 if __name__ == "__main__":
     try:
