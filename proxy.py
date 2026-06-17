@@ -26,7 +26,7 @@ def startup_event():
     scraper.init_session()
     print(f"Active domain: {scraper.active_domain}")
 
-@app.get("/play")
+@app.get("/play.m3u8")
 def play_stream(request: Request, title_id: int, episode_id: int):
     """
     Fetches the master M3U8 URL and returns the modified M3U8 text.
@@ -55,13 +55,13 @@ def play_stream(request: Request, title_id: int, episode_id: int):
             for line in lines:
                 if line.startswith("http"):
                     encoded_url = urllib.parse.quote(line)
-                    modified_lines.append(f"{request.base_url}proxy_child?url={encoded_url}")
+                    modified_lines.append(f"{request.base_url}proxy_child.m3u8?url={encoded_url}")
                 elif line.startswith("#EXT-X-MEDIA:"):
                     match = re.search(r'URI="([^"]+)"', line)
                     if match:
                         original_uri = match.group(1)
                         encoded_url = urllib.parse.quote(original_uri)
-                        new_uri = f"{request.base_url}proxy_child?url={encoded_url}"
+                        new_uri = f"{request.base_url}proxy_child.m3u8?url={encoded_url}"
                         line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
                     modified_lines.append(line)
                 else:
@@ -73,7 +73,7 @@ def play_stream(request: Request, title_id: int, episode_id: int):
         print(f"Error extracting stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/proxy_child")
+@app.get("/proxy_child.m3u8")
 def proxy_child(request: Request, url: str):
     """
     Proxies a child M3U8 file and modifies the enc.key URI if present.

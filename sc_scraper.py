@@ -122,12 +122,12 @@ class SCScraper:
             if config.DEBUG: print(f"Season details error: {e}")
         return {}
 
-    def get_stream_url(self, title_id: int, episode_id: int) -> tuple[Optional[str], Optional[list[dict[str, str]]]]:
+    def get_stream_url(self, title_id: int, episode_id: int) -> Optional[str]:
         """
-        Execute the 6-step pipeline to extract the 1080p M3U8 stream URL.
+        Execute the pipeline to extract the master M3U8 stream URL.
         """
         try:
-            # Step 4: Iframe extraction
+            # Step 1: Iframe extraction
             iframe_url = f"{self.active_domain}/it/iframe/{title_id}?episode_id={episode_id}&next_episode=1"
             referer = f"{self.active_domain}/it/watch/{title_id}?e={episode_id}"
             
@@ -137,9 +137,9 @@ class SCScraper:
             if embed_raw:
                 embed_url = htmlmod.unescape(embed_raw.group(1).replace('&amp;', '&'))
             else:
-                return None, None
+                return None
 
-            # Step 5: Load Vixcloud Embed
+            # Step 2: Load Vixcloud Embed
             vix_resp = self.client.get(embed_url, headers={"Referer": f"{self.active_domain}/", "Accept": "text/html"})
             
             token = re.search(r"'token'\s*:\s*'([^']+)'", vix_resp.text)
@@ -147,29 +147,11 @@ class SCScraper:
             pl_url = re.search(r"url:\s*'(https://vixcloud\.co/playlist/\d+)'", vix_resp.text)
             
             if not (token and expires and pl_url):
-                return None, None
+                return None
                 
             master_m3u8 = f"{pl_url.group(1)}?ub=1&token={token.group(1)}&expires={expires.group(1)}&h=1"
+            return master_m3u8
             
-            # Step 6: Fetch master playlist to extract all subtitle URLs
-            m3u8_resp = self.client.get(master_m3u8, headers={"Referer": embed_url.split('?')[0], "Origin": "https://vixcloud.co"})
-            
-            subs = []
-            if m3u8_resp.status_code == 200:
-                sub_matches = re.finditer(r'TYPE=SUBTITLES.+?NAME="([^"]+)".+?URI="([^"]+)"', m3u8_resp.text)
-                for match in sub_matches:
-                    name = match.group(1)
-                    sub_playlist_url = match.group(2)
-                    try:
-                        sub_resp = self.client.get(sub_playlist_url, headers={"Referer": embed_url.split('?')[0], "Origin": "https://vixcloud.co"})
-                        if sub_resp.status_code == 200:
-                            vtt_match = re.search(r'(https?://[^\s]+\.vtt[^\s]*)', sub_resp.text)
-                            if vtt_match:
-                                subs.append({"name": name, "url": vtt_match.group(1)})
-                    except Exception as sub_e:
-                        if config.DEBUG: print(f"Error fetching sub playlist: {sub_e}")
-                    
-            return master_m3u8, subs
         except Exception as e:
             if config.DEBUG: print(f"Stream extraction error: {e}")
-            return None, None
+            return None

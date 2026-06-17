@@ -61,7 +61,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                     base_name = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}"
                     strm_path = os.path.join(season_dir, f"{base_name}.strm")
                     with open(strm_path, "w", encoding="utf-8") as f:
-                        f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
+                        f.write(f"http://{server_ip}:8000/play.m3u8?title_id={title_id}&episode_id={ep_id}")
         rprint(f"[green]Successfully exported TV Show: {name}[/green]")
         rprint(f"[dim]Saved to: {shows_dir}[/dim]")
         
@@ -87,25 +87,12 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                 
             strm_path = os.path.join(movies_dir, f"{name}.strm")
             with open(strm_path, "w", encoding="utf-8") as f:
-                f.write(f"http://{server_ip}:8000/play?title_id={title_id}&episode_id={ep_id}")
+                f.write(f"http://{server_ip}:8000/play.m3u8?title_id={title_id}&episode_id={ep_id}")
                 
         rprint(f"[green]Successfully exported Movie: {name}[/green]")
         rprint(f"[dim]Saved to: {movies_dir}[/dim]")
 
-def download_sub(sub: dict[str, str]) -> Optional[str]:
-    try:
-        resp = httpx.get(sub['url'], headers={"Referer": "https://vixcloud.co/"}, timeout=5.0)
-        if resp.status_code == 200:
-            safe_name = "".join(c if c.isalnum() or c in " []()" else "_" for c in sub['name'])
-            sub_path = f"/tmp/{safe_name}.vtt"
-            with open(sub_path, "w", encoding="utf-8") as f:
-                f.write(resp.text)
-            return sub_path
-    except Exception as e:
-        rprint(f"[yellow]Warning: Could not download subtitle {sub.get('name')}: {e}[/yellow]")
-    return None
-
-def play_stream(url: str, subs: Optional[list[dict[str, str]]] = None) -> None:
+def play_stream(url: str) -> None:
     rprint(f"\n[bold green]Launching IINA...[/bold green]")
     try:
         ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -117,18 +104,6 @@ def play_stream(url: str, subs: Optional[list[dict[str, str]]] = None) -> None:
             "--mpv-http-header-fields=Referer: https://vixcloud.co/",
             "--mpv-slang=ita,it,Italian"
         ]
-        
-        if subs:
-            sub_paths: list[str] = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(download_sub, sub) for sub in subs]
-                for future in concurrent.futures.as_completed(futures):
-                    res = future.result()
-                    if res:
-                        sub_paths.append(res)
-            
-            if sub_paths:
-                cmd.append(f"--mpv-sub-files={':'.join(sub_paths)}")
                 
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
@@ -172,18 +147,18 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                     
                 if isinstance(episode, dict):
                     # Play episode
-                    with ui.show_spinner("Extracting stream URL and subtitles...") as progress:
+                    with ui.show_spinner("Extracting stream URL...") as progress:
                         task = progress.add_task("Extracting", total=None)
-                        m3u8_url, subs = scraper.get_stream_url(sc_title['id'], episode['id'])
+                        m3u8_url = scraper.get_stream_url(sc_title['id'], episode['id'])
                         
                     if m3u8_url:
-                        play_stream(m3u8_url, subs)
+                        play_stream(m3u8_url)
                     else:
                         rprint("[bold red]Failed to extract stream URL. Domain/Inertia might have changed.[/bold red]")
 
 def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     """Handles stream extraction and playback for a movie."""
-    with ui.show_spinner("Extracting stream URL and subtitles...") as progress:
+    with ui.show_spinner("Extracting stream URL...") as progress:
         task = progress.add_task("Extracting", total=None)
         details = scraper.get_title_details(sc_title['id'], sc_title.get('slug', ''))
         try:
@@ -196,14 +171,13 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             if not ep_id:
                 raise ValueError("Could not find movie episode ID in details.")
                 
-            m3u8_url, subs = scraper.get_stream_url(sc_title['id'], ep_id)
+            m3u8_url = scraper.get_stream_url(sc_title['id'], ep_id)
         except Exception as e:
             m3u8_url = None
-            subs = None
             rprint(f"[yellow]Warning during movie extraction: {e}[/yellow]")
             
         if m3u8_url:
-            play_stream(m3u8_url, subs)
+            play_stream(m3u8_url)
         else:
             rprint("[bold red]Failed to extract stream URL for movie.[/bold red]")
 
