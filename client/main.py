@@ -490,8 +490,17 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             else:
                 with local_proxy() as base_url:
                     play_target = _strm_url(base_url, title_id, ep_id)
-                    ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
                     
+                    try:
+                        import requests, re
+                        resp = requests.get(play_target, timeout=3)
+                        res_match = re.search(r'RESOLUTION=\d+x(\d+)', resp.text)
+                        if res_match:
+                            ui.show_success(f"Stream quality locked at: {res_match.group(1)}p")
+                    except Exception:
+                        pass
+                        
+                    ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
                     import subprocess
                     if config.PLAYER_APP.lower() == "iina":
                         cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
@@ -549,6 +558,16 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     else:
         with local_proxy() as base_url:
             play_target = _strm_url(base_url, title_id, ep_id)
+            
+            try:
+                import requests, re
+                resp = requests.get(play_target, timeout=3)
+                res_match = re.search(r'RESOLUTION=\d+x(\d+)', resp.text)
+                if res_match:
+                    ui.show_success(f"Stream quality locked at: {res_match.group(1)}p")
+            except Exception:
+                pass
+                
             ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
 
             import subprocess
