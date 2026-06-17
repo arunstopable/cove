@@ -147,10 +147,17 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                 if not ep_id:
                     continue
                 ep_name = safe_filename(ep.get("name", f"Episode {ep_num}"))
-                file_name = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.strm"
-                file_path = os.path.join(season_dir, file_name)
+                file_name_strm = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.strm"
+                file_name_mkv = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
+                file_path_strm = os.path.join(season_dir, file_name_strm)
+                file_path_mkv = os.path.join(season_dir, file_name_mkv)
 
-                with open(file_path, "w") as f:
+                if os.path.exists(file_path_mkv):
+                    if os.path.exists(file_path_strm):
+                        os.remove(file_path_strm)
+                    continue
+
+                with open(file_path_strm, "w") as f:
                     f.write(_strm_url(f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}", title_id, ep_id))
 
         ui.show_success(f"Exported {name} to {base_dir}")
@@ -174,9 +181,16 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
         movie_dir = os.path.join(base_dir, name)
         os.makedirs(movie_dir, exist_ok=True)
-        file_path = os.path.join(movie_dir, f"{name}.strm")
+        file_path_strm = os.path.join(movie_dir, f"{name}.strm")
+        file_path_mkv = os.path.join(movie_dir, f"{name}.mkv")
 
-        with open(file_path, "w") as f:
+        if os.path.exists(file_path_mkv):
+            if os.path.exists(file_path_strm):
+                os.remove(file_path_strm)
+            ui.show_info(f"Skipping export: {name}.mkv already exists.")
+            return
+
+        with open(file_path_strm, "w") as f:
             f.write(_strm_url(f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}", title_id, ep_id))
 
         ui.show_success(f"Exported {name} to {movie_dir}")

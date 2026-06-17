@@ -109,6 +109,13 @@ async def download_worker() -> None:
             if proc.returncode == 0:
                 os.rename(part_path, out_path)
                 log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
+                strm_path = out_path.replace(".mkv", ".strm")
+                if os.path.exists(strm_path):
+                    try:
+                        os.remove(strm_path)
+                        log.info(f"[DOWNLOAD] Deleted overlapping .strm file: {strm_path}")
+                    except Exception as e:
+                        log.error(f"[DOWNLOAD] Failed to delete .strm file: {e}")
             else:
                 log.error(f"[DOWNLOAD] ✗ Failed with code {proc.returncode}: {out_path}")
                 if os.path.exists(part_path):
