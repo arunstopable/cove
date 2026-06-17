@@ -325,34 +325,45 @@ def cleanup_offline(sc_title: dict[str, Any]) -> None:
 def show_download_status() -> None:
     ui.clear_screen()
     ui.print_header()
+    ui.show_info("Press Ctrl+C to return to main menu.\n")
     
-    url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/status"
-    try:
-        r = httpx.get(url, timeout=3.0)
-        if r.status_code == 200:
-            data = r.json()
-            queue_size = data.get("queue_size", 0)
-            current = data.get("current", {})
-            
-            from rich.panel import Panel
-            from rich.text import Text
-            
-            lines = []
-            if current.get("active"):
-                lines.append(f"[bold {ui.APPLE_BLUE}]Active Download:[/]")
-                lines.append(f"  {current.get('relative_path', 'Unknown')}")
-                lines.append(f"  [dim]Progress:[/] {current.get('downloaded_mb', 0)} MB")
-            else:
-                lines.append("[dim]No active downloads.[/]")
+    import time
+    from rich.live import Live
+    from rich.panel import Panel
+    
+    def get_status_panel() -> Panel:
+        url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/status"
+        try:
+            r = httpx.get(url, timeout=3.0)
+            if r.status_code == 200:
+                data = r.json()
+                queue_size = data.get("queue_size", 0)
+                current = data.get("current", {})
                 
-            lines.append("")
-            lines.append(f"Queue Size: {queue_size}")
-            
-            ui.console.print(Panel("\n".join(lines), title="Status", border_style=ui.BORDER_GRAY, padding=(1, 2)))
-        else:
-            ui.show_error(f"Server returned error: {r.status_code}")
-    except Exception as e:
-        ui.show_error(f"Failed to contact proxy: {e}")
+                lines = []
+                if current.get("active"):
+                    lines.append(f"[bold {ui.APPLE_BLUE}]Active Download:[/]")
+                    lines.append(f"  {current.get('relative_path', 'Unknown')}")
+                    lines.append(f"  [dim]Progress:[/] {current.get('downloaded_mb', 0)} MB")
+                else:
+                    lines.append("[dim]No active downloads.[/]")
+                    
+                lines.append("")
+                lines.append(f"Queue Size: {queue_size}")
+                
+                return Panel("\n".join(lines), title="Live Status (Refresh: 5s)", border_style=ui.BORDER_GRAY, padding=(1, 2))
+            else:
+                return Panel(f"[bold {ui.SOFT_RED}]Server returned error: {r.status_code}[/]", title="Error", border_style=ui.SOFT_RED)
+        except Exception as e:
+            return Panel(f"[bold {ui.SOFT_RED}]Failed to contact proxy: {e}[/]", title="Error", border_style=ui.SOFT_RED)
+
+    try:
+        with Live(get_status_panel(), refresh_per_second=1, console=ui.console) as live:
+            while True:
+                time.sleep(5)
+                live.update(get_status_panel())
+    except KeyboardInterrupt:
+        pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -474,7 +485,6 @@ def main() -> None:
                 
             if main_action == "STATUS":
                 show_download_status()
-                input("\nPress Enter to return...")
                 continue
                 
             selected = None
