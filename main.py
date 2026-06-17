@@ -511,6 +511,19 @@ def main() -> None:
             if not selected or selected == "BACK":
                 continue
 
+            # If it's from library and missing slug, fetch it silently
+            if not selected.get("slug"):
+                with ui.spinner("Resolving metadata..."):
+                    search_results = scraper.search(selected.get("name", ""))
+                    for r in search_results:
+                        if r.get("id") == selected.get("id"):
+                            selected["slug"] = r.get("slug", "")
+                            break
+                if not selected.get("slug"):
+                    ui.show_error("Could not resolve metadata for this title on the server.")
+                    input("\nPress Enter to return...")
+                    continue
+
             # Title selected -> Action menu
             while True:
                 ui.clear_screen()
