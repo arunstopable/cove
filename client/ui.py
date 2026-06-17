@@ -62,7 +62,15 @@ def print_header() -> None:
 [/]"""
     status_proxy = f"[bold green]● Proxy Online[/]" if SERVER_ONLINE else f"[bold red]○ Proxy Offline[/]"
     status_nfs = f"[bold green]● NFS Connected[/]" if NFS_ONLINE else f"[bold red]○ NFS Disconnected[/]"
-    console.print(Panel(logo.strip() + f"\n\n  {status_proxy}  |  {status_nfs}", border_style=BORDER_GRAY, expand=False))
+    
+    if MAX_QUALITY == "1080p":
+        status_q = f"[bold {SOFT_GREEN}]★ VIP (1080p)[/]"
+    elif MAX_QUALITY == "720p":
+        status_q = f"[bold {CRISP_WHITE}]○ Free (720p)[/]"
+    else:
+        status_q = f"[dim]○ Q: ?[/]"
+        
+    console.print(Panel(logo.strip() + f"\n\n  {status_proxy}  |  {status_nfs}  |  {status_q}", border_style=BORDER_GRAY, expand=False))
     console.print()
 
 

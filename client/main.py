@@ -602,16 +602,7 @@ def main() -> None:
     scraper = SCScraper()
     with ui.spinner("Initializing session & checking account limits..."):
         scraper.init_session()
-        max_q = scraper.check_global_quality()
-        
-    if max_q == "1080p":
-        ui.show_success(f"Account VIP Detected: Max Quality unlocked ({max_q})")
-    elif max_q == "720p":
-        ui.show_info(f"Free Account limits: Max Quality capped at {max_q}")
-    else:
-        ui.show_error(f"Could not determine Max Quality (Got: {max_q})")
-    import time
-    time.sleep(2)
+        ui.MAX_QUALITY = scraper.check_global_quality()
 
     try:
         while True:
