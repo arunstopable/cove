@@ -1,4 +1,5 @@
 import sys
+import os
 import subprocess
 import questionary
 from rich import print as rprint
@@ -133,6 +134,7 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    os.system('clear')
     ui.print_header()
     
     scraper = SCScraper()
