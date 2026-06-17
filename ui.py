@@ -222,6 +222,25 @@ def select_scope(show_name: str, seasons: list[dict[str, Any]]) -> Union[str, di
     ).ask()
 
 
+def select_season(seasons: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
+    choices: list[questionary.Choice] = []
+
+    for s in seasons:
+        num = s.get("number", "?")
+        eps = s.get("episodes_count", 0)
+        label = f"  Season {num} ({eps} eps)"
+        choices.append(questionary.Choice(title=label, value=s))
+
+    choices.append(_back())
+    return questionary.select(
+        "Select Season:",
+        choices=choices,
+        style=cove_style,
+        qmark="",
+        pointer="❯",
+    ).ask()
+
+
 def select_episode(
     episodes: list[dict[str, Any]], 
     downloaded_ids: set[int] = None
