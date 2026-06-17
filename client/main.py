@@ -590,7 +590,10 @@ def main() -> None:
                 
             elif main_action == "SEARCH":
                 query = ui.ask_search_query()
-                if not query:
+                if query is None:
+                    ui.show_info("Goodbye.")
+                    break
+                if not query.strip():
                     continue
 
                 with ui.spinner("Searching..."):
