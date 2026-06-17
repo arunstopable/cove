@@ -410,17 +410,24 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         return
 
     ep_id: int = episode.get("id", 0)
-    strm_url = _strm_url(title_id, ep_id)
-
-    ui.show_info(f"Opening local player ({config.PLAYER_APP})...")
+    ep_num: int = episode.get("number", 0)
+    
+    if ep_num in downloaded_nums:
+        ep_name = safe_filename(episode.get("name", f"Episode {ep_num}"))
+        rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
+        play_target = os.path.join(config.NFS_SHOWS_PATH, rel_path)
+        ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
+    else:
+        play_target = _strm_url(title_id, ep_id)
+        ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
     
     import subprocess
     if config.PLAYER_APP.lower() == "iina":
-        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", strm_url]
+        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
     elif config.PLAYER_APP.lower() == "vlc":
-        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", strm_url]
+        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
     else:
-        cmd = [config.PLAYER_APP, strm_url]
+        cmd = [config.PLAYER_APP, play_target]
 
     try:
         subprocess.run(cmd, check=False)
@@ -448,16 +455,24 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         ui.show_error("Could not find playback ID.")
         return
 
-    strm_url = _strm_url(title_id, ep_id)
-    ui.show_info(f"Opening local player ({config.PLAYER_APP})...")
+    name = safe_filename(sc_title.get("name", "Unknown"))
+    rel_path = f"{name}/{name}.mkv"
+    phys_path = os.path.join(config.NFS_MOVIES_PATH, rel_path)
+    
+    if os.path.exists(phys_path):
+        play_target = phys_path
+        ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
+    else:
+        play_target = _strm_url(title_id, ep_id)
+        ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
 
     import subprocess
     if config.PLAYER_APP.lower() == "iina":
-        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", strm_url]
+        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
     elif config.PLAYER_APP.lower() == "vlc":
-        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", strm_url]
+        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
     else:
-        cmd = [config.PLAYER_APP, strm_url]
+        cmd = [config.PLAYER_APP, play_target]
 
     try:
         subprocess.run(cmd, check=False)

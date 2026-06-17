@@ -78,9 +78,10 @@ async def download_worker() -> None:
             out_path = os.path.join(base_path, rel_path)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             
+            part_path = out_path + ".part"
             current_download["active"] = True
             current_download["relative_path"] = rel_path
-            current_download["absolute_path"] = out_path
+            current_download["absolute_path"] = out_path  # keep base path for tracking
 
             log.info(f"[DOWNLOAD] Extracting URL for {title_id} / {episode_id}")
             m3u8_url = await _get_stream_url(title_id, episode_id)
@@ -89,7 +90,7 @@ async def download_worker() -> None:
                 download_queue.task_done()
                 continue
                 
-            log.info(f"[DOWNLOAD] Starting ffmpeg to {out_path}")
+            log.info(f"[DOWNLOAD] Starting ffmpeg to {part_path}")
             
             ffmpeg_cmd = [
                 "ffmpeg", "-y", "-v", "error", 
@@ -99,16 +100,19 @@ async def download_worker() -> None:
                 "-i", m3u8_url,
                 "-map", "0:v:0", "-map", "0:a", "-map", "0:s?",
                 "-c:v", "copy", "-c:a", "aac", "-c:s", "copy",
-                "-f", "matroska", out_path
+                "-f", "matroska", part_path
             ]
             
             proc = await asyncio.create_subprocess_exec(*ffmpeg_cmd)
             await proc.wait()
             
             if proc.returncode == 0:
+                os.rename(part_path, out_path)
                 log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
             else:
                 log.error(f"[DOWNLOAD] ✗ Failed with code {proc.returncode}: {out_path}")
+                if os.path.exists(part_path):
+                    os.remove(part_path)
                 
             current_download["active"] = False
             download_queue.task_done()
@@ -238,8 +242,10 @@ async def queue_download(req: DownloadRequest) -> dict[str, str]:
 async def download_status() -> dict[str, Any]:
     """Return the current download status and queue size."""
     size_mb = 0.0
-    if current_download["active"] and os.path.exists(current_download["absolute_path"]):
-        size_mb = os.path.getsize(current_download["absolute_path"]) / (1024 * 1024)
+    if current_download["active"]:
+        part_path = current_download["absolute_path"] + ".part"
+        if os.path.exists(part_path):
+            size_mb = os.path.getsize(part_path) / (1024 * 1024)
         
     return {
         "queue_size": download_queue.qsize(),
