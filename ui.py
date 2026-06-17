@@ -3,6 +3,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from typing import Any, Optional, Union
+from prompt_toolkit.formatted_text import FormattedText
 
 console = Console()
 
@@ -59,10 +60,10 @@ def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, An
     for r in results:
         title = r.get('name', 'Unknown')
         if r.get('type') == 'tv':
-            tag = "🟩" # Green square
+            formatted_title = FormattedText([("class:ansigreen", "• "), ("", title)])
         else:
-            tag = "🟦" # Blue square
-        choices.append(questionary.Choice(title=f"{tag} {title}", value=r))
+            formatted_title = FormattedText([("class:ansiblue", "• "), ("", title)])
+        choices.append(questionary.Choice(title=formatted_title, value=r))
         
     return questionary.select(
         "Select a search result:",
