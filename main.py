@@ -2,6 +2,7 @@ import sys
 import subprocess
 import questionary
 from rich import print as rprint
+from typing import Any, Optional
 
 import httpx
 import ui
@@ -10,7 +11,7 @@ from sc_scraper import SCScraper
 
 import concurrent.futures
 
-def download_sub(sub):
+def download_sub(sub: dict[str, str]) -> Optional[str]:
     try:
         resp = httpx.get(sub['url'], headers={"Referer": "https://vixcloud.co/"}, timeout=5.0)
         if resp.status_code == 200:
@@ -20,10 +21,10 @@ def download_sub(sub):
                 f.write(resp.text)
             return sub_path
     except Exception as e:
-        rprint(f"[yellow]Warning: Could not download subtitle {sub['name']}: {e}[/yellow]")
+        rprint(f"[yellow]Warning: Could not download subtitle {sub.get('name')}: {e}[/yellow]")
     return None
 
-def play_stream(url: str, subs: list = None):
+def play_stream(url: str, subs: Optional[list[dict[str, str]]] = None) -> None:
     rprint(f"\n[bold green]Launching IINA...[/bold green]")
     try:
         ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -35,8 +36,9 @@ def play_stream(url: str, subs: list = None):
             "--mpv-http-header-fields=Referer: https://vixcloud.co/",
             "--mpv-slang=ita,it,Italian"
         ]
+        
         if subs:
-            sub_paths = []
+            sub_paths: list[str] = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [executor.submit(download_sub, sub) for sub in subs]
                 for future in concurrent.futures.as_completed(futures):
@@ -51,13 +53,13 @@ def play_stream(url: str, subs: list = None):
     except Exception as e:
         rprint(f"[bold red]Failed to launch IINA: {e}[/bold red]")
 
-def handle_tv_show(scraper: SCScraper, sc_title, watched_episodes: set = None):
+def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any], watched_episodes: Optional[set[tuple[int, int]]] = None) -> None:
     if watched_episodes is None:
         watched_episodes = set()
 
     with ui.show_spinner("Fetching show details...") as progress:
         task = progress.add_task("Fetching", total=None)
-        details = scraper.get_title_details(sc_title['id'], sc_title['slug'])
+        details = scraper.get_title_details(sc_title['id'], sc_title.get('slug', ''))
     
     if not details:
         rprint("[red]Could not fetch details.[/red]")
@@ -73,37 +75,64 @@ def handle_tv_show(scraper: SCScraper, sc_title, watched_episodes: set = None):
         if not season or season == "BACK":
             break
             
-        season_num = season.get('number')
-        
-        with ui.show_spinner(f"Fetching Season {season_num} episodes...") as progress:
-            task = progress.add_task("Fetching", total=None)
-            season_data = scraper.get_season_details(sc_title['id'], sc_title['slug'], season_num)
+        if isinstance(season, dict):
+            season_num = season.get('number', 1)
             
-        episodes = season_data.get('loadedSeason', {}).get('episodes', [])
-        
-        # Mark watched
-        for ep in episodes:
-            ep_num = ep.get('number')
-            ep['is_watched'] = (season_num, ep_num) in watched_episodes
+            with ui.show_spinner(f"Fetching Season {season_num} episodes...") as progress:
+                task = progress.add_task("Fetching", total=None)
+                season_data = scraper.get_season_details(sc_title['id'], sc_title.get('slug', ''), season_num)
+                
+            episodes = season_data.get('loadedSeason', {}).get('episodes', [])
             
-        while True:
-            episode = ui.select_episode(episodes)
-            if not episode or episode == "BACK":
-                break
+            # Mark watched
+            for ep in episodes:
+                ep_num = ep.get('number', 0)
+                ep['is_watched'] = (season_num, ep_num) in watched_episodes
                 
-            # Play episode
-            with ui.show_spinner("Extracting stream URL and subtitles...") as progress:
-                task = progress.add_task("Extracting", total=None)
-                m3u8_url, subs = scraper.get_stream_url(sc_title['id'], episode['id'])
-                
-            if m3u8_url:
-                play_stream(m3u8_url, subs)
-                # After playing, we return so user can watch. 
-                # (We don't block the UI, but usually you watch one thing at a time)
-            else:
-                rprint("[bold red]Failed to extract stream URL. Domain/Inertia might have changed.[/bold red]")
+            while True:
+                episode = ui.select_episode(episodes)
+                if not episode or episode == "BACK":
+                    break
+                    
+                if isinstance(episode, dict):
+                    # Play episode
+                    with ui.show_spinner("Extracting stream URL and subtitles...") as progress:
+                        task = progress.add_task("Extracting", total=None)
+                        m3u8_url, subs = scraper.get_stream_url(sc_title['id'], episode['id'])
+                        
+                    if m3u8_url:
+                        play_stream(m3u8_url, subs)
+                    else:
+                        rprint("[bold red]Failed to extract stream URL. Domain/Inertia might have changed.[/bold red]")
 
-def main():
+def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
+    """Handles stream extraction and playback for a movie."""
+    with ui.show_spinner("Extracting stream URL and subtitles...") as progress:
+        task = progress.add_task("Extracting", total=None)
+        details = scraper.get_title_details(sc_title['id'], sc_title.get('slug', ''))
+        try:
+            # For movies, SC usually has a single episode under 'loadedSeason' or 'title.episodes'
+            ep_id = details.get('title', {}).get('episodes', [{}])[0].get('id')
+            if not ep_id:
+                # Fallback if structure is slightly different
+                ep_id = details.get('loadedSeason', {}).get('episodes', [{}])[0].get('id')
+                
+            if not ep_id:
+                raise ValueError("Could not find movie episode ID in details.")
+                
+            m3u8_url, subs = scraper.get_stream_url(sc_title['id'], ep_id)
+        except Exception as e:
+            m3u8_url = None
+            subs = None
+            rprint(f"[yellow]Warning during movie extraction: {e}[/yellow]")
+            
+        if m3u8_url:
+            play_stream(m3u8_url, subs)
+        else:
+            rprint("[bold red]Failed to extract stream URL for movie.[/bold red]")
+
+
+def main() -> None:
     ui.print_header()
     
     scraper = SCScraper()
@@ -155,65 +184,50 @@ def main():
             # Fetch TMDB details to show proper titles
             for item in my_list:
                 if 'title' not in item or not item['title']:
-                    tmdb_data = db_client.fetch_tmdb_details(item['tmdb_id'], item['media_type'])
+                    tmdb_data = db_client.fetch_tmdb_details(item.get('tmdb_id', 0), item.get('media_type', ''))
                     if tmdb_data:
                         item['title'] = tmdb_data['title']
                     else:
-                        item['title'] = f"Unknown ({item['tmdb_id']})"
+                        item['title'] = f"Unknown ({item.get('tmdb_id')})"
                         
             while True:
                 selected_item = ui.select_media(my_list)
                 if not selected_item or selected_item == "BACK":
                     break
                     
-                # We need to find this item on StreamingCommunity
-                title_to_search = selected_item['title']
-                with ui.show_spinner(f"Searching SC for '{title_to_search}'...") as progress:
-                    task = progress.add_task("Searching", total=None)
-                    results = scraper.search(title_to_search)
-                    
-                if not results:
-                    rprint(f"[red]No matches found for '{title_to_search}' on StreamingCommunity.[/red]")
-                    continue
-                    
-                sc_title = None
-                if len(results) == 1:
-                    sc_title = results[0]
-                else:
-                    # Let user disambiguate
-                    sc_title = ui.select_sc_search_result(results)
-                    
-                if not sc_title or sc_title == "BACK":
-                    continue
-                    
-                if selected_item['media_type'] == 'tv':
-                    # Fetch progress
-                    with ui.show_spinner("Fetching progress from Kino...") as progress:
-                        task = progress.add_task("Fetching progress", total=None)
-                        watched_episodes = db_client.get_watched_episodes(selected_item['tmdb_id'])
+                if isinstance(selected_item, dict):
+                    title_to_search = selected_item.get('title', '')
+                    with ui.show_spinner(f"Searching SC for '{title_to_search}'...") as progress:
+                        task = progress.add_task("Searching", total=None)
+                        results = scraper.search(title_to_search)
                         
-                    handle_tv_show(scraper, sc_title, watched_episodes)
-                else:
-                    # Movie logic
-                    with ui.show_spinner("Extracting stream URL and subtitles...") as progress:
-                        task = progress.add_task("Extracting", total=None)
-                        # Movies usually have season 1 episode 1 or similar structure, wait...
-                        # In SC, movies have title details without seasons.
-                        # We just call get_stream_url with the title id. Wait, episode id is needed?
-                        # Let's fetch details to get the "episode" id for the movie.
-                        details = scraper.get_title_details(sc_title['id'], sc_title['slug'])
-                        # For movies, there's usually a loadedSeason -> episodes -> index 0
-                        try:
-                            ep_id = details['title']['episodes'][0]['id'] # SC might structure movies this way
-                            m3u8_url, subs = scraper.get_stream_url(sc_title['id'], ep_id)
-                        except:
-                            m3u8_url = None
-                            subs = None
-                            
-                        if m3u8_url:
-                            play_stream(m3u8_url, subs)
+                    if not results:
+                        rprint(f"[red]No matches found for '{title_to_search}' on StreamingCommunity.[/red]")
+                        continue
+                        
+                    sc_title: Optional[dict[str, Any]] = None
+                    if len(results) == 1:
+                        sc_title = results[0]
+                    else:
+                        # Let user disambiguate
+                        selected_res = ui.select_sc_search_result(results)
+                        if isinstance(selected_res, dict):
+                            sc_title = selected_res
                         else:
-                            rprint("[bold red]Failed to extract stream URL for movie.[/bold red]")
+                            sc_title = None
+                        
+                    if not sc_title or sc_title == "BACK":
+                        continue
+                        
+                    if selected_item.get('media_type') == 'tv':
+                        # Fetch progress
+                        with ui.show_spinner("Fetching progress from Kino...") as progress:
+                            task = progress.add_task("Fetching progress", total=None)
+                            watched_episodes = db_client.get_watched_episodes(selected_item.get('tmdb_id', 0))
+                            
+                        handle_tv_show(scraper, sc_title, watched_episodes)
+                    else:
+                        handle_movie(scraper, sc_title)
                             
         elif action == "Search StreamingCommunity":
             query = questionary.text("Enter title to search:").ask()
@@ -228,29 +242,15 @@ def main():
                 rprint("[red]No results found.[/red]")
                 continue
                 
-            sc_title = ui.select_sc_search_result(results)
-            if not sc_title or sc_title == "BACK":
+            selected_res = ui.select_sc_search_result(results)
+            if not selected_res or selected_res == "BACK" or not isinstance(selected_res, dict):
                 continue
                 
-            if sc_title.get('type') == 'tv':
-                handle_tv_show(scraper, sc_title, set())
+            sc_title_search = selected_res
+            if sc_title_search.get('type') == 'tv':
+                handle_tv_show(scraper, sc_title_search, set())
             else:
-                # Movie
-                with ui.show_spinner("Extracting stream URL and subtitles...") as progress:
-                    task = progress.add_task("Extracting", total=None)
-                    details = scraper.get_title_details(sc_title['id'], sc_title['slug'])
-                    try:
-                        ep_id = details['title']['episodes'][0]['id']
-                        m3u8_url, subs = scraper.get_stream_url(sc_title['id'], ep_id)
-                    except Exception as e:
-                        print(e)
-                        m3u8_url = None
-                        subs = None
-                        
-                    if m3u8_url:
-                        play_stream(m3u8_url, subs)
-                    else:
-                        rprint("[bold red]Failed to extract stream URL.[/bold red]")
+                handle_movie(scraper, sc_title_search)
 
 if __name__ == "__main__":
     try:
@@ -258,3 +258,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         rprint("\n[dim]Goodbye![/dim]")
         sys.exit(0)
+
