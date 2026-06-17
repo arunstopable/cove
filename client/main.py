@@ -17,19 +17,15 @@ from shared import config
 from client import ui
 from shared.sc_scraper import SCScraper
 
-server_online = False
+server_online = False  # Legacy, will remove below
 local_proxy_running = False
 
 @contextlib.contextmanager
 def local_proxy() -> Generator[str, None, None]:
     """Launch a temporary uvicorn proxy on localhost and yield its base URL."""
     global local_proxy_running
-    if server_online:
-        yield f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}"
-        return
-
     import subprocess
-    ui.show_info("Starting temporary local proxy for offline streaming...")
+    ui.show_info("Starting temporary local proxy for Mac streaming...")
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "proxy.main:app", "--host", "127.0.0.1", "--port", "8001"],
         stdout=subprocess.DEVNULL,
@@ -542,14 +538,15 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    global server_online
     ui.clear_screen()
-    with ui.spinner("Checking server status..."):
+    with ui.spinner("Checking system status..."):
         try:
             r = httpx.get(f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/health", timeout=1.0)
-            server_online = (r.status_code == 200)
+            ui.SERVER_ONLINE = (r.status_code == 200)
         except Exception:
-            server_online = False
+            ui.SERVER_ONLINE = False
+            
+        ui.NFS_ONLINE = os.path.exists(config.NFS_SHOWS_PATH) and os.path.exists(config.NFS_MOVIES_PATH)
 
     scraper = SCScraper()
     scraper.init_session()
@@ -557,12 +554,15 @@ def main() -> None:
     try:
         while True:
             ui.clear_screen()
-            ui.print_header(server_online)
+            ui.print_header()
 
-            main_action = ui.select_main_menu(server_online)
-            if not main_action or main_action == "EXIT":
-                ui.show_info("Goodbye.")
-                break
+            if not ui.SERVER_ONLINE and not ui.NFS_ONLINE:
+                main_action = "SEARCH"
+            else:
+                main_action = ui.select_main_menu()
+                if not main_action or main_action == "EXIT":
+                    ui.show_info("Goodbye.")
+                    break
                 
             if main_action == "STATUS":
                 show_download_status()
@@ -618,15 +618,18 @@ def main() -> None:
             # Title selected -> Action menu
             while True:
                 ui.clear_screen()
-                ui.print_header(server_online)
+                ui.print_header()
                 
                 name = selected.get("name", "Unknown")
                 kind = "TV" if selected.get("type") == "tv" else "Movie"
                 ui.show_info(f"Selected: {name} ({kind})")
 
-                action = ui.select_action(server_online)
-                if not action or action == "BACK":
-                    break
+                if not ui.SERVER_ONLINE:
+                    action = "PLAY"
+                else:
+                    action = ui.select_action()
+                    if not action or action == "BACK":
+                        break
 
                 if action == "EXPORT":
                     export_media(scraper, selected)
@@ -642,6 +645,9 @@ def main() -> None:
                         handle_tv_show(scraper, selected)
                     else:
                         handle_movie(scraper, selected)
+                        
+                    if not ui.SERVER_ONLINE:
+                        break
 
     except KeyboardInterrupt:
         ui.console.print("\n[dim]Aborted by user.[/]")

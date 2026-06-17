@@ -15,6 +15,9 @@ from shared import config
 
 console = Console()
 
+SERVER_ONLINE = False
+NFS_ONLINE = False
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Styling Theme
 # ──────────────────────────────────────────────────────────────────────────────
@@ -48,7 +51,7 @@ def clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def print_header(server_online: bool = True) -> None:
+def print_header() -> None:
     logo = """[bold white]
    ██████╗ ██████╗ ██╗   ██╗███████╗
   ██╔════╝██╔═══██╗██║   ██║██╔════╝
@@ -57,8 +60,9 @@ def print_header(server_online: bool = True) -> None:
   ╚██████╗╚██████╔╝ ╚████╔╝ ███████╗
    ╚═════╝ ╚═════╝   ╚═══╝  ╚══════╝
 [/]"""
-    status_badge = f"[bold green]● Server Online[/]" if server_online else f"[bold red]○ Server Offline[/]"
-    console.print(Panel(logo.strip() + f"\n\n  {status_badge}", border_style=BORDER_GRAY, expand=False))
+    status_proxy = f"[bold green]● Proxy Online[/]" if SERVER_ONLINE else f"[bold red]○ Proxy Offline[/]"
+    status_nfs = f"[bold green]● NFS Connected[/]" if NFS_ONLINE else f"[bold red]○ NFS Disconnected[/]"
+    console.print(Panel(logo.strip() + f"\n\n  {status_proxy}  |  {status_nfs}", border_style=BORDER_GRAY, expand=False))
     console.print()
 
 
@@ -118,15 +122,16 @@ def ask_search_query() -> str:
     ).ask()
 
 
-def select_main_menu(server_online: bool = True) -> str:
+def select_main_menu() -> str:
     choices = [
         questionary.Choice(title="  Search Title", value="SEARCH"),
-        questionary.Choice(title="  My Library", value="LIBRARY"),
     ]
-    if server_online:
-        choices.extend([
-            questionary.Choice(title="  View Download Status", value="STATUS"),
-        ])
+    if NFS_ONLINE:
+        choices.append(questionary.Choice(title="  My Library", value="LIBRARY"))
+    
+    if SERVER_ONLINE:
+        choices.append(questionary.Choice(title="  View Download Status", value="STATUS"))
+        
     choices.append(questionary.Choice(title="  Exit", value="EXIT"))
     
     return questionary.select(
@@ -192,11 +197,11 @@ def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, An
     ).ask()
 
 
-def select_action(server_online: bool = True) -> str:
+def select_action() -> str:
     choices = [
         questionary.Choice(title="  Play Locally", value="PLAY"),
     ]
-    if server_online:
+    if SERVER_ONLINE:
         choices.extend([
             questionary.Choice(title="  Download Offline", value="DOWNLOAD"),
             questionary.Choice(title="  Export to Jellyfin", value="EXPORT"),
