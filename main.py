@@ -8,6 +8,7 @@ from typing import Any, Optional
 import httpx
 import ui
 from sc_scraper import SCScraper
+import config
 
 import concurrent.futures
 import re
@@ -26,9 +27,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         rprint("[yellow]Please mount your NFS volumes first and try again.[/yellow]")
         return
         
-    server_ip = ui.ask_server_ip()
-    if not server_ip:
-        server_ip = "127.0.0.1"
+    server_ip = config.PROXY_SERVER_IP
         
     title_id = sc_title['id']
     name = safe_filename(sc_title.get('name', 'Unknown'))

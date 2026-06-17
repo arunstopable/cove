@@ -71,9 +71,3 @@ def select_action() -> str:
             questionary.Choice(title="[Back]", value="BACK")
         ]
     ).ask()
-
-def ask_server_ip() -> str:
-    return questionary.text(
-        "Enter the local IP address of your TrueNAS server (e.g., 192.168.1.50):",
-        default="127.0.0.1"
-    ).ask()
