@@ -658,7 +658,7 @@ def main() -> None:
                     if not ui.SERVER_ONLINE:
                         break
 
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         ui.console.print("\n[dim]Aborted by user.[/]")
     finally:
         scraper.close()
