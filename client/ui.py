@@ -8,15 +8,15 @@ import questionary
 from prompt_toolkit.formatted_text import FormattedText
 from rich.console import Console
 from rich.panel import Panel
+from rich.console import Console
+from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.text import Text
-
-from shared import config
 
 console = Console()
 
 SERVER_ONLINE = False
 NFS_ONLINE = False
+MAX_QUALITY = "Unknown"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Styling Theme
@@ -29,22 +29,25 @@ SOFT_RED = "#FF3B30"
 SOFT_GREEN = "#34C759"
 BORDER_GRAY = "#333333"
 
-cove_style = questionary.Style([
-    ("qmark", f"fg:{APPLE_BLUE} bold"),
-    ("question", f"fg:{CRISP_WHITE} bold"),
-    ("answer", f"fg:{APPLE_BLUE} bold"),
-    ("pointer", f"fg:{APPLE_BLUE} bold"),
-    ("highlighted", f"fg:{APPLE_BLUE} bold"),
-    ("selected", f"fg:{SOFT_GREEN} bold"),
-    ("separator", f"fg:{DIM_GRAY}"),
-    ("instruction", f"fg:{DIM_GRAY} italic"),
-    ("text", f"fg:#CCCCCC"),
-])
+cove_style = questionary.Style(
+    [
+        ("qmark", f"fg:{APPLE_BLUE} bold"),
+        ("question", f"fg:{CRISP_WHITE} bold"),
+        ("answer", f"fg:{APPLE_BLUE} bold"),
+        ("pointer", f"fg:{APPLE_BLUE} bold"),
+        ("highlighted", f"fg:{APPLE_BLUE} bold"),
+        ("selected", f"fg:{SOFT_GREEN} bold"),
+        ("separator", f"fg:{DIM_GRAY}"),
+        ("instruction", f"fg:{DIM_GRAY} italic"),
+        ("text", f"fg:#CCCCCC"),
+    ]
+)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Core Engine
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def clear_screen() -> None:
     """Clear the terminal screen completely."""
@@ -60,17 +63,31 @@ def print_header() -> None:
   ╚██████╗╚██████╔╝ ╚████╔╝ ███████╗
    ╚═════╝ ╚═════╝   ╚═══╝  ╚══════╝
 [/]"""
-    status_proxy = f"[bold green]● Proxy Online[/]" if SERVER_ONLINE else f"[bold red]○ Proxy Offline[/]"
-    status_nfs = f"[bold green]● NFS Connected[/]" if NFS_ONLINE else f"[bold red]○ NFS Disconnected[/]"
-    
+    status_proxy = (
+        f"[bold green]● Proxy Online[/]"
+        if SERVER_ONLINE
+        else f"[bold red]○ Proxy Offline[/]"
+    )
+    status_nfs = (
+        f"[bold green]● NFS Connected[/]"
+        if NFS_ONLINE
+        else f"[bold red]○ NFS Disconnected[/]"
+    )
+
     if MAX_QUALITY == "1080p":
         status_q = f"[bold {SOFT_GREEN}]★ VIP (1080p)[/]"
     elif MAX_QUALITY == "720p":
         status_q = f"[bold {CRISP_WHITE}]○ Free (720p)[/]"
     else:
         status_q = f"[dim]○ Q: ?[/]"
-        
-    console.print(Panel(logo.strip() + f"\n\n  {status_proxy}  |  {status_nfs}  |  {status_q}", border_style=BORDER_GRAY, expand=False))
+
+    console.print(
+        Panel(
+            logo.strip() + f"\n\n  {status_proxy}  |  {status_nfs}  |  {status_q}",
+            border_style=BORDER_GRAY,
+            expand=False,
+        )
+    )
     console.print()
 
 
@@ -103,8 +120,11 @@ def spinner(message: str) -> Generator[None, None, None]:
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def _back() -> questionary.Choice:
-    return questionary.Choice(title=FormattedText([("class:ansidarkgray", "< Back")]), value="BACK")
+    return questionary.Choice(
+        title=FormattedText([("class:ansidarkgray", "< Back")]), value="BACK"
+    )
 
 
 def _year(title: dict[str, Any]) -> str:
@@ -122,12 +142,9 @@ def _year(title: dict[str, Any]) -> str:
 # Prompts & Selectors
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def ask_search_query() -> str:
-    return questionary.text(
-        "Search title:",
-        style=cove_style,
-        qmark=">"
-    ).ask()
+    return questionary.text("Search title:", style=cove_style, qmark=">").ask()
 
 
 def select_main_menu() -> str:
@@ -136,12 +153,14 @@ def select_main_menu() -> str:
     ]
     if NFS_ONLINE:
         choices.append(questionary.Choice(title="  My Library", value="LIBRARY"))
-    
+
     if SERVER_ONLINE:
-        choices.append(questionary.Choice(title="  View Download Status", value="STATUS"))
-        
+        choices.append(
+            questionary.Choice(title="  View Download Status", value="STATUS")
+        )
+
     choices.append(questionary.Choice(title="  Exit", value="EXIT"))
-    
+
     return questionary.select(
         "Main Menu:",
         choices=choices,
@@ -151,19 +170,23 @@ def select_main_menu() -> str:
     ).ask()
 
 
-def select_library_item(items: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
+def select_library_item(
+    items: list[dict[str, Any]],
+) -> Union[dict[str, Any], str, None]:
     choices: list[questionary.Choice] = []
-    
+
     for item in items:
         name = item.get("name", "Unknown")
         kind = "TV" if item.get("type") == "tv" else "Movie"
         color = "class:ansicyan" if kind == "TV" else "class:ansiblue"
-        
-        label = FormattedText([
-            (color, "■ "),
-            ("", f"{name} "),
-            ("class:ansidarkgray", f"[{kind}]"),
-        ])
+
+        label = FormattedText(
+            [
+                (color, "■ "),
+                ("", f"{name} "),
+                ("class:ansidarkgray", f"[{kind}]"),
+            ]
+        )
         choices.append(questionary.Choice(title=label, value=item))
 
     choices.append(_back())
@@ -176,7 +199,9 @@ def select_library_item(items: list[dict[str, Any]]) -> Union[dict[str, Any], st
     ).ask()
 
 
-def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
+def select_sc_search_result(
+    results: list[dict[str, Any]],
+) -> Union[dict[str, Any], str, None]:
     """Display search results with type and year labels."""
     choices: list[questionary.Choice] = []
 
@@ -188,11 +213,13 @@ def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, An
         color = "class:ansicyan" if is_tv else "class:ansiblue"
         suffix = f" [{kind}{', ' + year if year else ''}]"
 
-        label = FormattedText([
-            (color, "■ "),
-            ("", f"{name} "),
-            ("class:ansidarkgray", suffix),
-        ])
+        label = FormattedText(
+            [
+                (color, "■ "),
+                ("", f"{name} "),
+                ("class:ansidarkgray", suffix),
+            ]
+        )
         choices.append(questionary.Choice(title=label, value=r))
 
     choices.append(_back())
@@ -210,13 +237,15 @@ def select_action() -> str:
         questionary.Choice(title="  Play Locally", value="PLAY"),
     ]
     if SERVER_ONLINE:
-        choices.extend([
-            questionary.Choice(title="  Download Offline", value="DOWNLOAD"),
-            questionary.Choice(title="  Export to Jellyfin", value="EXPORT"),
-            questionary.Choice(title="  Cleanup Physical Files", value="CLEANUP"),
-        ])
+        choices.extend(
+            [
+                questionary.Choice(title="  Download Offline", value="DOWNLOAD"),
+                questionary.Choice(title="  Export to Jellyfin", value="EXPORT"),
+                questionary.Choice(title="  Cleanup Physical Files", value="CLEANUP"),
+            ]
+        )
     choices.append(_back())
-    
+
     return questionary.select(
         "Action:",
         choices=choices,
@@ -226,11 +255,13 @@ def select_action() -> str:
     ).ask()
 
 
-def select_scope(show_name: str, seasons: list[dict[str, Any]]) -> Union[str, dict[str, Any], None]:
+def select_scope(
+    show_name: str, seasons: list[dict[str, Any]]
+) -> Union[str, dict[str, Any], None]:
     choices: list[questionary.Choice] = [
         questionary.Choice(title=f"  All Seasons ({show_name})", value="ALL")
     ]
-    
+
     for s in seasons:
         num = s.get("number", "?")
         eps = s.get("episodes_count", 0)
@@ -267,9 +298,9 @@ def select_season(seasons: list[dict[str, Any]]) -> Union[dict[str, Any], str, N
 
 
 def select_episode(
-    episodes: list[dict[str, Any]], 
+    episodes: list[dict[str, Any]],
     downloaded_ids: set[int] = None,
-    default: dict[str, Any] = None
+    default: dict[str, Any] = None,
 ) -> Union[dict[str, Any], str, None]:
     choices: list[questionary.Choice] = []
     if downloaded_ids is None:
@@ -281,26 +312,29 @@ def select_episode(
         num: int = ep.get("number", 0)
         ep_id: int = ep.get("id", 0)
         title: str = ep.get("name", "Untitled")
-        
+
         if ep_id in downloaded_ids:
             # Green checkmark for physically downloaded MKV files
             prefix = [("class:ansigreen", "✓ ")]
         else:
             # Gray dot for streaming available
             prefix = [("class:ansidarkgray", "• ")]
-            
-        label = FormattedText(prefix + [
-            ("", f"Ep {num:02d}: "),
-            ("class:ansidarkgray", title),
-        ])
+
+        label = FormattedText(
+            prefix
+            + [
+                ("", f"Ep {num:02d}: "),
+                ("class:ansidarkgray", title),
+            ]
+        )
         choice = questionary.Choice(title=label, value=ep)
         choices.append(choice)
-        
+
         if default and default.get("id") == ep_id:
             default_choice = choice
 
     choices.append(_back())
-    
+
     kwargs = {}
     if default_choice:
         kwargs["default"] = default_choice
@@ -311,13 +345,12 @@ def select_episode(
         style=cove_style,
         qmark="",
         pointer="❯",
-        **kwargs
+        **kwargs,
     ).ask()
 
 
 def select_episodes_multi(
-    episodes: list[dict[str, Any]], 
-    downloaded_ids: set[int] = None
+    episodes: list[dict[str, Any]], downloaded_ids: set[int] = None
 ) -> list[dict[str, Any]]:
     """Multi-select checkbox for downloading specific episodes."""
     choices: list[questionary.Choice] = []
@@ -328,18 +361,24 @@ def select_episodes_multi(
         num: int = ep.get("number", 0)
         ep_id: int = ep.get("id", 0)
         title: str = ep.get("name", "Untitled")
-        
+
         if ep_id in downloaded_ids:
             # Already downloaded
-            label = FormattedText([
-                ("class:ansigreen", f"Ep {num:02d}: {title} (Downloaded)"),
-            ])
-            choices.append(questionary.Choice(title=label, value=ep, disabled="Already downloaded"))
+            label = FormattedText(
+                [
+                    ("class:ansigreen", f"Ep {num:02d}: {title} (Downloaded)"),
+                ]
+            )
+            choices.append(
+                questionary.Choice(title=label, value=ep, disabled="Already downloaded")
+            )
         else:
-            label = FormattedText([
-                ("", f"Ep {num:02d}: "),
-                ("class:ansidarkgray", title),
-            ])
+            label = FormattedText(
+                [
+                    ("", f"Ep {num:02d}: "),
+                    ("class:ansidarkgray", title),
+                ]
+            )
             choices.append(questionary.Choice(title=label, value=ep))
 
     if not choices or all(c.disabled for c in choices):

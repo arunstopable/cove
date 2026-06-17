@@ -29,7 +29,7 @@ class SCScraper:
 
     # Patterns to find SC domain candidates in the anchor page HTML
     _DOMAIN_PATTERNS: list[str] = [
-        r'https://streamingcommunity[a-zA-Z0-9.-]+\.[a-z]{2,}',
+        r"https://streamingcommunity[a-zA-Z0-9.-]+\.[a-z]{2,}",
         r'href=["\']+(https://streamingcommunity[a-zA-Z0-9.-]+\.[a-z]{2,})["\']',
         r'action=["\']+(https://streamingcommunity[a-zA-Z0-9.-]+\.[a-z]{2,})["\']',
     ]
@@ -86,12 +86,18 @@ class SCScraper:
         for attempt in range(self.MAX_RETRIES):
             try:
                 return self.client.get(url, **kwargs)
-            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            except (
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                httpx.RemoteProtocolError,
+            ) as exc:
                 last_exc = exc
                 if attempt < self.MAX_RETRIES - 1:
-                    wait = 2 ** attempt  # 1 s, 2 s, 4 s
+                    wait = 2**attempt  # 1 s, 2 s, 4 s
                     if config.DEBUG:
-                        print(f"[retry] Attempt {attempt + 1} failed for {url!r}: {exc}. Waiting {wait}s…")
+                        print(
+                            f"[retry] Attempt {attempt + 1} failed for {url!r}: {exc}. Waiting {wait}s…"
+                        )
                     time.sleep(wait)
         raise last_exc  # type: ignore[misc]
 
@@ -135,7 +141,9 @@ class SCScraper:
 
         except Exception as exc:
             if config.DEBUG:
-                print(f"[domain] Resolution error: {exc}. Keeping: {self.active_domain}")
+                print(
+                    f"[domain] Resolution error: {exc}. Keeping: {self.active_domain}"
+                )
 
         return self.active_domain
 
@@ -200,39 +208,62 @@ class SCScraper:
         """
         try:
             titles = self.search("Fallout")
-            if not titles: return "Unknown"
-            
-            title_id = titles[0]['id']
-            slug = titles[0]['slug']
+            if not titles:
+                return "Unknown"
+
+            title_id = titles[0]["id"]
+            slug = titles[0]["slug"]
             details = self.get_title_details(title_id, slug)
-            
+
             ep_id = details.get("loadedSeason", {}).get("episodes", [{}])[0].get("id")
             if not ep_id:
                 ep_id = details.get("title", {}).get("episodes", [{}])[0].get("id")
-            if not ep_id: return "Unknown"
-            
+            if not ep_id:
+                return "Unknown"
+
             iframe_url = f"{self.active_domain}/it/iframe/{title_id}?episode_id={ep_id}&next_episode=1"
-            iframe_resp = self._get(iframe_url, headers={'Referer': f"{self.active_domain}/it/watch/{title_id}?e={ep_id}"})
-            
+            iframe_resp = self._get(
+                iframe_url,
+                headers={
+                    "Referer": f"{self.active_domain}/it/watch/{title_id}?e={ep_id}"
+                },
+            )
+
             import re
-            embed_match = re.search(r'src=[\"\']+(https://vixcloud\.co/embed/[^\"\']+)[\"\']', iframe_resp.text)
-            if not embed_match: return "Unknown"
-            
-            embed_url = embed_match.group(1).replace('&amp;', '&')
-            vix_resp = self._get(embed_url, headers={'Referer': f"{self.active_domain}/"})
-            
-            token_match = re.search(r'\'token\': \'([^\']+)\'', vix_resp.text)
-            expires_match = re.search(r'\'expires\': \'([^\']+)\'', vix_resp.text)
-            playlist_match = re.search(r'url:\s*\'(https://vixcloud\.co/playlist/\d+)\'', vix_resp.text)
-            
-            if not (token_match and expires_match and playlist_match): return "Unknown"
-            
+
+            embed_match = re.search(
+                r"src=[\"\']+(https://vixcloud\.co/embed/[^\"\']+)[\"\']",
+                iframe_resp.text,
+            )
+            if not embed_match:
+                return "Unknown"
+
+            embed_url = embed_match.group(1).replace("&amp;", "&")
+            vix_resp = self._get(
+                embed_url, headers={"Referer": f"{self.active_domain}/"}
+            )
+
+            token_match = re.search(r"\'token\': \'([^\']+)\'", vix_resp.text)
+            expires_match = re.search(r"\'expires\': \'([^\']+)\'", vix_resp.text)
+            playlist_match = re.search(
+                r"url:\s*\'(https://vixcloud\.co/playlist/\d+)\'", vix_resp.text
+            )
+
+            if not (token_match and expires_match and playlist_match):
+                return "Unknown"
+
             master_url = f"{playlist_match.group(1)}?ub=1&token={token_match.group(1)}&expires={expires_match.group(1)}"
-            resp = self._get(master_url, headers={'Referer': 'https://vixcloud.co/', 'User-Agent': self.client.headers.get("User-Agent")})
-            
+            resp = self._get(
+                master_url,
+                headers={
+                    "Referer": "https://vixcloud.co/",
+                    "User-Agent": self.client.headers.get("User-Agent"),
+                },
+            )
+
             max_h = 0
             for line in resp.text.splitlines():
-                res = re.search(r'RESOLUTION=\d+x(\d+)', line)
+                res = re.search(r"RESOLUTION=\d+x(\d+)", line)
                 if res:
                     max_h = max(max_h, int(res.group(1)))
             return f"{max_h}p" if max_h else "Unknown"
@@ -253,7 +284,9 @@ class SCScraper:
             "Referer": f"{self.active_domain}{referer_path}",
         }
 
-    def _inertia_get(self, url: str, referer_path: str = "/it/") -> Optional[dict[str, Any]]:
+    def _inertia_get(
+        self, url: str, referer_path: str = "/it/"
+    ) -> Optional[dict[str, Any]]:
         """
         Perform a GET with Inertia headers.
         Automatically re-initializes the session on 409 / 419 and retries once.
@@ -264,7 +297,9 @@ class SCScraper:
 
             if resp.status_code in (409, 419):
                 if config.DEBUG:
-                    print(f"[inertia] {resp.status_code} conflict — refreshing session and retrying…")
+                    print(
+                        f"[inertia] {resp.status_code} conflict — refreshing session and retrying…"
+                    )
                 self.init_session()
                 resp = self._get(url, headers=self._inertia_headers(referer_path))
 
@@ -298,7 +333,9 @@ class SCScraper:
         url = f"{self.active_domain}/it/titles/{title_id}-{slug}"
         return self._inertia_get(url) or {}
 
-    def get_season_details(self, title_id: int, slug: str, season_num: int) -> dict[str, Any]:
+    def get_season_details(
+        self, title_id: int, slug: str, season_num: int
+    ) -> dict[str, Any]:
         """Return the props dict for a specific season (episode list)."""
         url = f"{self.active_domain}/it/titles/{title_id}-{slug}/season-{season_num}"
         referer = f"/it/titles/{title_id}-{slug}"
@@ -334,7 +371,9 @@ class SCScraper:
             )
             if not embed_match:
                 if config.DEBUG:
-                    print(f"[stream] Embed URL not found (title={title_id}, ep={episode_id})")
+                    print(
+                        f"[stream] Embed URL not found (title={title_id}, ep={episode_id})"
+                    )
                 return None
 
             embed_url = htmlmod.unescape(embed_match.group(1))
@@ -369,9 +408,7 @@ class SCScraper:
                 return None
 
             # ── Step 3: assemble M3U8 URL ────────────────────────────────
-            master_m3u8 = (
-                f"{playlist_url}?ub=1&token={token}&expires={expires}"
-            )
+            master_m3u8 = f"{playlist_url}?ub=1&token={token}&expires={expires}"
 
             if config.DEBUG:
                 print(f"[stream] OK → {master_m3u8[:80]}…")

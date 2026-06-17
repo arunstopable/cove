@@ -4,32 +4,29 @@ Cove Proxy Server — FastAPI proxy for Jellyfin / Streamyfin.
 Endpoints
 ─────────
 GET /health              Health check: domain, session state, cache size.
-GET /stream.mkv          ffmpeg-piped MKV (video + audio + all subtitles).
-                         Used by Jellyfin .strm files and Streamyfin offline downloads.
+GET /api/downloads/status Get the current download queue status.
+POST /api/downloads      Queue a new download.
 GET /play.m3u8           Rewritten master HLS M3U8 (all child URLs go through proxy).
-                         Kept for compatibility with HLS-native players.
 GET /proxy_child.m3u8   Proxy for child (quality-level / audio / subtitle) M3U8 files.
-                         Resolves relative segment paths and proxies the enc.key.
 GET /enc.key             Proxies AES-128 encryption keys from Vixcloud.
 """
 
 import asyncio
 import logging
 import re
-import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Optional
-import os
 
 import httpx
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 
 from shared import config
 from shared.sc_scraper import SCScraper
+from proxy.m3u8_rewriter import rewrite_master_m3u8, rewrite_child_m3u8
+from proxy.downloader import download_worker, download_queue, current_download
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -52,120 +49,94 @@ VIXCLOUD_REFERER = "https://vixcloud.co/"
 # ──────────────────────────────────────────────────────────────────────────────
 
 scraper = SCScraper()
-_scraper_lock = asyncio.Lock()  # Serialises all scraper calls (sync client, not thread-safe)
+_scraper_lock = (
+    asyncio.Lock()
+)  # Serialises all scraper calls (sync client, not thread-safe)
 
 # TTL cache:  (title_id, episode_id) → (m3u8_url, cached_at)
 _stream_cache: dict[tuple[int, int], tuple[str, datetime]] = {}
 _CACHE_TTL = timedelta(minutes=4)  # Vixcloud tokens expire after ~5 minutes
 
-VIXCLOUD_REFERER = "https://vixcloud.co/"
 
-# Download Queue and Status
-download_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-current_download: dict[str, Any] = {
-    "active": False,
-    "relative_path": "",
-    "absolute_path": "",
-}
+async def _get_stream_url(title_id: int, episode_id: int) -> Optional[str]:
+    """Fetch the real Vixcloud stream URL, using TTL cache."""
+    now = datetime.now()
+    if (title_id, episode_id) in _stream_cache:
+        url, cached_at = _stream_cache[(title_id, episode_id)]
+        if now - cached_at < _CACHE_TTL:
+            return url
 
-async def download_worker() -> None:
-    """Background task to process downloads sequentially."""
-    global current_download
-    while True:
+    async with _scraper_lock:
         try:
-            task = await download_queue.get()
-            title_id = task["title_id"]
-            episode_id = task["episode_id"]
-            media_type = task["type"]
-            rel_path = task["relative_path"]
-            
-            base_path = config.SERVER_SHOWS_PATH if media_type == "tv" else config.SERVER_MOVIES_PATH
-            out_path = os.path.join(base_path, rel_path)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            
-            part_path = out_path + ".part"
-            current_download["active"] = True
-            current_download["relative_path"] = rel_path
-            current_download["absolute_path"] = out_path  # keep base path for tracking
+            titles = await asyncio.to_thread(scraper.search, str(title_id))
+            if not titles:
+                return None
 
-            log.info(f"[DOWNLOAD] Extracting URL for {title_id} / {episode_id}")
-            m3u8_url = await _get_stream_url(title_id, episode_id)
-            if not m3u8_url:
-                log.error(f"[DOWNLOAD] Failed to extract URL for {out_path}")
-                download_queue.task_done()
-                continue
-                
-            log.info(f"[DOWNLOAD] Starting ffmpeg to {part_path}")
-            
-            # Use the local proxy so ffmpeg benefits from the quality filtering
-            proxy_url = f"http://127.0.0.1:8000/play.m3u8?title_id={title_id}&episode_id={episode_id}"
-            
-            ffmpeg_cmd = [
-                "ffmpeg", "-y", "-v", "error", 
-                "-allowed_extensions", "ALL", 
-                "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-                "-i", proxy_url,
-                "-map", "0:v:0", "-map", "0:a", "-map", "0:s?",
-                "-c:v", "copy", "-c:a", "aac", "-c:s", "copy",
-                "-f", "matroska", part_path
-            ]
-            
-            proc = await asyncio.create_subprocess_exec(*ffmpeg_cmd)
-            await proc.wait()
-            
-            if proc.returncode == 0:
-                os.rename(part_path, out_path)
-                log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
-                strm_path = out_path.replace(".mkv", ".strm")
-                if os.path.exists(strm_path):
-                    try:
-                        os.remove(strm_path)
-                        log.info(f"[DOWNLOAD] Deleted overlapping .strm file: {strm_path}")
-                    except Exception as e:
-                        log.error(f"[DOWNLOAD] Failed to delete .strm file: {e}")
-            else:
-                log.error(f"[DOWNLOAD] ✗ Failed with code {proc.returncode}: {out_path}")
-                if os.path.exists(part_path):
-                    os.remove(part_path)
-                
-            current_download["active"] = False
-            download_queue.task_done()
-        except asyncio.CancelledError:
-            break
+            slug = titles[0].get("slug")
+            await asyncio.to_thread(scraper.get_title_details, title_id, slug)
+
+            iframe_url = f"{scraper.active_domain}/it/iframe/{title_id}?episode_id={episode_id}&next_episode=1"
+            iframe_resp = await asyncio.to_thread(
+                scraper._get,
+                iframe_url,
+                headers={
+                    "Referer": f"{scraper.active_domain}/it/watch/{title_id}?e={episode_id}"
+                },
+            )
+
+            embed_match = re.search(
+                r"src=[\"\']+(https://vixcloud\.co/embed/[^\"\']+)[\"\']",
+                iframe_resp.text,
+            )
+            if not embed_match:
+                return None
+
+            embed_url = embed_match.group(1).replace("&amp;", "&")
+            vix_resp = await asyncio.to_thread(
+                scraper._get,
+                embed_url,
+                headers={"Referer": f"{scraper.active_domain}/"},
+            )
+
+            token_match = re.search(r"\'token\': \'([^\']+)\'", vix_resp.text)
+            expires_match = re.search(r"\'expires\': \'([^\']+)\'", vix_resp.text)
+            playlist_match = re.search(
+                r"url:\s*\'(https://vixcloud\.co/playlist/\d+)\'", vix_resp.text
+            )
+
+            if not (token_match and expires_match and playlist_match):
+                return None
+
+            master_url = f"{playlist_match.group(1)}?ub=1&token={token_match.group(1)}&expires={expires_match.group(1)}"
+
+            _stream_cache[(title_id, episode_id)] = (master_url, now)
+            return master_url
+
         except Exception as e:
-            log.error(f"[DOWNLOAD] Worker error: {e}")
-            current_download["active"] = False
-            try:
-                download_queue.task_done()
-            except ValueError:
-                pass
+            log.error(f"Error fetching stream URL: {e}")
+            return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Lifespan (startup / shutdown)
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    log.info("Initializing SCScraper session…")
+    log.info("Starting Cove Proxy...")
     await asyncio.to_thread(scraper.init_session)
     log.info(f"Active domain: {scraper.active_domain}")
-    
-    worker_task = asyncio.create_task(download_worker())
-    
+
+    worker_task = asyncio.create_task(download_worker(_get_stream_url))
+
     yield
-    
-    log.info("Shutting down — closing HTTP client…")
+
     worker_task.cancel()
-    scraper.close()
+    log.info("Shutting down Cove Proxy...")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# App
-# ──────────────────────────────────────────────────────────────────────────────
-
-app = FastAPI(title="Cove Proxy", version="3.0.0", lifespan=lifespan)
-
+app = FastAPI(title="Cove Proxy", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -176,317 +147,133 @@ app.add_middleware(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Stream URL cache helper
+# API Models
 # ──────────────────────────────────────────────────────────────────────────────
 
-async def _get_stream_url(title_id: int, episode_id: int) -> Optional[str]:
-    """
-    Return a valid master M3U8 URL for the given title/episode, using an
-    in-memory TTL cache to avoid redundant extractions.
-
-    Thread-safety: all scraper calls are serialised by _scraper_lock so that
-    the synchronous httpx.Client is never used from two threads at once.
-    """
-    cache_key = (title_id, episode_id)
-
-    # Fast path: valid cached entry (no lock needed for a pure read)
-    entry = _stream_cache.get(cache_key)
-    if entry and datetime.now() - entry[1] < _CACHE_TTL:
-        log.debug(f"Cache hit — ({title_id}, {episode_id})")
-        return entry[0]
-
-    async with _scraper_lock:
-        # Double-check after acquiring the lock (another coroutine may have
-        # already populated the cache while we were waiting)
-        entry = _stream_cache.get(cache_key)
-        if entry and datetime.now() - entry[1] < _CACHE_TTL:
-            return entry[0]
-
-        log.info(f"Extracting stream URL — title={title_id} episode={episode_id}")
-        url = await asyncio.to_thread(scraper.get_stream_url, title_id, episode_id)
-
-        if not url:
-            log.warning("Extraction failed — re-initializing session and retrying…")
-            await asyncio.to_thread(scraper.init_session)
-            url = await asyncio.to_thread(scraper.get_stream_url, title_id, episode_id)
-
-        if url:
-            _stream_cache[cache_key] = (url, datetime.now())
-            log.info(f"Cached — ({title_id}, {episode_id})")
-
-        return url
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints
-# ──────────────────────────────────────────────────────────────────────────────
-
-@app.get("/health")
-async def health() -> dict[str, Any]:
-    """Return server status, active domain, and session age."""
-    age: Optional[float] = None
-    if scraper._last_init:
-        age = round((datetime.now() - scraper._last_init).total_seconds(), 1)
-    return {
-        "status": "ok",
-        "domain": scraper.active_domain,
-        "session_valid": scraper._session_valid,
-        "session_age_seconds": age,
-        "cache_entries": len(_stream_cache),
-        "download_queue_size": download_queue.qsize(),
-    }
-
-
-# ─── /api/download ────────────────────────────────────────────────────────────
 
 class DownloadRequest(BaseModel):
     title_id: int
     episode_id: int
-    type: str
+    type: str  # "tv" or "movie"
     relative_path: str
 
-@app.post("/api/download")
-async def queue_download(req: DownloadRequest) -> dict[str, str]:
-    """Queue a media file for background downloading via ffmpeg."""
-    await download_queue.put(req.model_dump())
-    log.info(f"Queued download: {req.relative_path} (Queue size: {download_queue.qsize()})")
-    return {"status": "queued"}
 
-@app.get("/api/downloads/status")
-async def download_status() -> dict[str, Any]:
-    """Return the current download status and queue size."""
-    size_mb = 0.0
-    if current_download["active"]:
-        part_path = current_download["absolute_path"] + ".part"
-        if os.path.exists(part_path):
-            size_mb = os.path.getsize(part_path) / (1024 * 1024)
-        
-    return {
-        "queue_size": download_queue.qsize(),
-        "current": {
-            "active": current_download["active"],
-            "relative_path": current_download["relative_path"],
-            "downloaded_mb": round(size_mb, 2)
-        }
-    }
+# ──────────────────────────────────────────────────────────────────────────────
+# Routes: API
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    """Health check for the proxy server."""
-    return {"status": "ok"}
+async def health_check() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "domain": scraper.active_domain,
+        "session_valid": scraper._session_valid,
+        "cache_size": len(_stream_cache),
+    }
+
+
+@app.get("/api/downloads/status")
+async def get_download_status() -> dict[str, Any]:
+    return {
+        "active_download": current_download if current_download["active"] else None,
+        "queue_size": download_queue.qsize(),
+    }
+
+
+@app.post("/api/downloads")
+async def queue_download(req: DownloadRequest) -> dict[str, str]:
+    await download_queue.put(req.dict())
+    return {"status": "queued"}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Routes: Proxy
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @app.get("/play.m3u8")
 async def play_m3u8(title_id: int, episode_id: int, request: Request) -> Response:
     """
-    Fetch the master HLS M3U8 and rewrite all child playlist URIs to route
-    through /proxy_child.m3u8 on this server.
-
-    Handles:
-    - Absolute URL stream lines  (video quality playlists)
-    - URI="" attributes in tags  (#EXT-X-MEDIA audio / subtitle tracks)
+    Returns the rewritten Master M3U8.
     """
     m3u8_url = await _get_stream_url(title_id, episode_id)
     if not m3u8_url:
-        raise HTTPException(status_code=404, detail="Stream not found or extraction failed.")
+        raise HTTPException(
+            status_code=404, detail="Stream URL not found or extraction failed."
+        )
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(m3u8_url, headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT})
+            resp = await client.get(
+                m3u8_url,
+                headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT},
+            )
         if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="Failed to fetch master M3U8.")
+            raise HTTPException(
+                status_code=resp.status_code, detail="Failed to fetch master M3U8."
+            )
 
-        proxy_base = str(request.base_url).rstrip("/")
-        modified = _rewrite_master_m3u8(resp.text, proxy_base)
-        return Response(content=modified, media_type="application/vnd.apple.mpegurl")
+        m3u8_text = resp.text
+        proxy_base_url = f"{request.url.scheme}://{request.url.netloc}"
+        rewritten_m3u8 = rewrite_master_m3u8(m3u8_text, proxy_base_url, title_id)
+
+        return Response(
+            content=rewritten_m3u8, media_type="application/vnd.apple.mpegurl"
+        )
 
     except httpx.RequestError as exc:
         log.error(f"Error fetching master M3U8: {exc}")
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(
+            status_code=502, detail="Error communicating with upstream stream server."
+        )
 
-
-# ─── /proxy_child.m3u8 ───────────────────────────────────────────────────────
 
 @app.get("/proxy_child.m3u8")
-async def proxy_child_m3u8(url: str, request: Request) -> Response:
+async def proxy_child_m3u8(title_id: int, child_url: str, request: Request) -> Response:
     """
     Proxy a child M3U8 (video quality level, audio track, or subtitle track).
-
-    Transforms applied:
-    - Relative segment paths → absolute Vixcloud URLs
-    - #EXT-X-KEY URI → routed through /enc.key on this server
     """
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT})
+            resp = await client.get(
+                child_url,
+                headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT},
+            )
         if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="Failed to fetch child M3U8.")
+            raise HTTPException(
+                status_code=resp.status_code, detail="Failed to fetch child M3U8."
+            )
 
-        proxy_base = str(request.base_url).rstrip("/")
-        segment_base = url.rsplit("/", 1)[0]
-        modified = _rewrite_child_m3u8(resp.text, segment_base, proxy_base)
-        return Response(content=modified, media_type="application/vnd.apple.mpegurl")
+        proxy_base_url = f"{request.url.scheme}://{request.url.netloc}"
+        rewritten_m3u8 = rewrite_child_m3u8(resp.text, child_url, proxy_base_url)
+        return Response(
+            content=rewritten_m3u8, media_type="application/vnd.apple.mpegurl"
+        )
 
     except httpx.RequestError as exc:
-        log.error(f"Error fetching child M3U8: {exc}")
-        raise HTTPException(status_code=502, detail=str(exc))
+        log.error(f"Error proxying child M3U8: {exc}")
+        raise HTTPException(
+            status_code=502, detail="Error communicating with upstream server."
+        )
 
-
-# ─── /enc.key ────────────────────────────────────────────────────────────────
 
 @app.get("/enc.key")
-async def proxy_enc_key(url: str) -> Response:
+async def proxy_enc_key(key_url: str) -> Response:
     """
-    Proxy an AES-128 encryption key from Vixcloud.
-
-    Encryption key URIs in child M3U8 files are rewritten to point here so
-    that the player does not need to add custom Referer headers for key fetches.
+    Proxy an AES-128 encryption key request.
     """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT})
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                key_url,
+                headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT},
+            )
         if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="Failed to fetch encryption key.")
+            raise HTTPException(
+                status_code=resp.status_code, detail="Failed to fetch key."
+            )
         return Response(content=resp.content, media_type="application/octet-stream")
-
     except httpx.RequestError as exc:
-        log.error(f"Error fetching enc.key: {exc}")
-        raise HTTPException(status_code=502, detail=str(exc))
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# M3U8 rewriting helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _rewrite_master_m3u8(m3u8_text: str, proxy_base: str) -> str:
-    """
-    Rewrite a master M3U8 so every child playlist URI is routed through
-    /proxy_child.m3u8 on this server.
-
-    Handles:
-      • Bare absolute URL lines (video stream playlist references)
-      • URI="…" attributes inside tag lines (#EXT-X-MEDIA, #EXT-X-I-FRAME-STREAM-INF …)
-    """
-    lines = m3u8_text.splitlines()
-    out_headers: list[str] = []
-    streams: list[dict[str, Any]] = []
-    
-    current_stream_tag = None
-    
-    for line in lines:
-        stripped = line.strip()
-
-        if not stripped:
-            continue
-            
-        if stripped.startswith("#EXT-X-STREAM-INF"):
-            current_stream_tag = line
-            continue
-            
-        if current_stream_tag:
-            # We found a URL following a stream tag
-            res_match = re.search(r'RESOLUTION=\d+x(\d+)', current_stream_tag)
-            height = int(res_match.group(1)) if res_match else 0
-            bw_match = re.search(r'BANDWIDTH=(\d+)', current_stream_tag)
-            bw = int(bw_match.group(1)) if bw_match else 0
-            
-            # Rewrite URL to proxy child
-            if stripped.startswith("http"):
-                encoded = urllib.parse.quote(stripped, safe="")
-                rewritten_url = f"{proxy_base}/proxy_child.m3u8?url={encoded}"
-            else:
-                rewritten_url = stripped
-                
-            streams.append({
-                'tag': current_stream_tag,
-                'url': rewritten_url,
-                'height': height,
-                'bw': bw
-            })
-            current_stream_tag = None
-            continue
-
-        # ── URI="" attribute inside a header/media tag line ──────────────────
-        if stripped.startswith("#") and 'URI="' in stripped:
-            def _replace_uri(match: re.Match) -> str:  # noqa: E306
-                original = match.group(1)
-                encoded = urllib.parse.quote(original, safe="")
-                return f'URI="{proxy_base}/proxy_child.m3u8?url={encoded}"'
-
-            line = re.sub(r'URI="([^"]+)"', _replace_uri, line)
-
-        out_headers.append(line)
-
-    # Sort streams by height descending, then bandwidth descending
-    streams.sort(key=lambda s: (s['height'], s['bw']), reverse=True)
-    
-    # We only keep the best stream to force highest quality available (e.g. 1080p or 720p)
-    if streams:
-        best_stream = streams[0]
-        out_headers.append(best_stream['tag'])
-        out_headers.append(best_stream['url'])
-
-    return "\n".join(out_headers)
-
-
-def _rewrite_child_m3u8(m3u8_text: str, segment_base: str, proxy_base: str) -> str:
-    """
-    Rewrite a child M3U8:
-      • #EXT-X-KEY URI  → proxied through /enc.key (handles relative and absolute URIs)
-      • Relative segment paths → absolute Vixcloud URLs
-      • Absolute segment paths that start with '/' → prefixed with vixcloud.co host
-    """
-    lines = m3u8_text.splitlines()
-    out: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-
-        if not stripped:
-            out.append(line)
-            continue
-
-        # ── #EXT-X-KEY: proxy the encryption key URI ─────────────────────────
-        if stripped.startswith("#EXT-X-KEY") and "URI=" in stripped:
-            def _replace_key_uri(match: re.Match) -> str:  # noqa: E306
-                key_uri = match.group(1)
-                # Resolve relative key URIs to an absolute Vixcloud URL
-                if key_uri.startswith("/"):
-                    key_uri = f"https://vixcloud.co{key_uri}"
-                elif not key_uri.startswith("http"):
-                    key_uri = f"{segment_base}/{key_uri}"
-                encoded = urllib.parse.quote(key_uri, safe="")
-                return f'URI="{proxy_base}/enc.key?url={encoded}"'
-
-            line = re.sub(r'URI="([^"]+)"', _replace_key_uri, line)
-            out.append(line)
-            continue
-
-        # ── Non-comment lines: make segment paths absolute ────────────────────
-        if not stripped.startswith("#"):
-            if stripped.startswith("http"):
-                pass  # Already absolute, keep as-is
-            elif stripped.startswith("/"):
-                line = f"https://vixcloud.co{stripped}"
-            else:
-                line = f"{segment_base}/{stripped}"
-
-        out.append(line)
-
-    return "\n".join(out)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Entry point (for direct execution)
-# ──────────────────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "proxy:app",
-        host="0.0.0.0",
-        port=config.PROXY_SERVER_PORT,
-        reload=False,
-    )
+        log.error(f"Error fetching encryption key: {exc}")
+        raise HTTPException(status_code=502, detail="Error fetching encryption key.")
