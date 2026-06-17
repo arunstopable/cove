@@ -11,6 +11,7 @@ from typing import Any, Optional, Generator
 import urllib.parse
 
 import httpx
+import questionary
 from rich import print as rprint
 
 from shared import config
