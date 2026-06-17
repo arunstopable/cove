@@ -296,6 +296,32 @@ def cleanup_offline(sc_title: dict[str, Any]) -> None:
         rprint(f"[bold green]✓ Deleted {deleted} file(s).[/bold green]")
 
 
+def show_download_status() -> None:
+    """Fetch and display the current download status from the proxy server."""
+    url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/status"
+    try:
+        r = httpx.get(url, timeout=3.0)
+        if r.status_code == 200:
+            data = r.json()
+            queue_size = data.get("queue_size", 0)
+            current = data.get("current", {})
+            
+            rprint("\n[bold cyan]── Download Status ──[/bold cyan]")
+            if current.get("active"):
+                rel_path = current.get("relative_path", "Unknown")
+                mb = current.get("downloaded_mb", 0)
+                rprint(f"[bold green]▶ Downloading:[/bold green] {rel_path}")
+                rprint(f"   [yellow]Progress:[/yellow] {mb} MB downloaded")
+            else:
+                rprint("[yellow]No active downloads.[/yellow]")
+                
+            rprint(f"[cyan]Episodes in queue:[/cyan] {queue_size}\n")
+        else:
+            rprint(f"[red]Server returned error: {r.status_code}[/red]")
+    except Exception as e:
+        rprint(f"[red]Failed to contact proxy server: {e}[/red]")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Playback
 # ──────────────────────────────────────────────────────────────────────────────
@@ -483,6 +509,9 @@ def main() -> None:
             export_media(scraper, selected)
         elif action == "DOWNLOAD":
             download_offline(scraper, selected)
+        elif action == "STATUS":
+            show_download_status()
+            input("\nPress Enter to continue...")
         elif action == "CLEANUP":
             cleanup_offline(selected)
         elif action == "PLAY":

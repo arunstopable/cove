@@ -55,11 +55,17 @@ _CACHE_TTL = timedelta(minutes=4)  # Vixcloud tokens expire after ~5 minutes
 
 VIXCLOUD_REFERER = "https://vixcloud.co/"
 
-# Download Queue
+# Download Queue and Status
 download_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+current_download: dict[str, Any] = {
+    "active": False,
+    "relative_path": "",
+    "absolute_path": "",
+}
 
 async def download_worker() -> None:
     """Background task to process downloads sequentially."""
+    global current_download
     while True:
         try:
             task = await download_queue.get()
@@ -72,6 +78,10 @@ async def download_worker() -> None:
             out_path = os.path.join(base_path, rel_path)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             
+            current_download["active"] = True
+            current_download["relative_path"] = rel_path
+            current_download["absolute_path"] = out_path
+
             log.info(f"[DOWNLOAD] Extracting URL for {title_id} / {episode_id}")
             m3u8_url = await _get_stream_url(title_id, episode_id)
             if not m3u8_url:
@@ -100,11 +110,13 @@ async def download_worker() -> None:
             else:
                 log.error(f"[DOWNLOAD] ✗ Failed with code {proc.returncode}: {out_path}")
                 
+            current_download["active"] = False
             download_queue.task_done()
         except asyncio.CancelledError:
             break
         except Exception as e:
             log.error(f"[DOWNLOAD] Worker error: {e}")
+            current_download["active"] = False
             try:
                 download_queue.task_done()
             except ValueError:
@@ -221,6 +233,24 @@ async def queue_download(req: DownloadRequest) -> dict[str, str]:
     await download_queue.put(req.model_dump())
     log.info(f"Queued download: {req.relative_path} (Queue size: {download_queue.qsize()})")
     return {"status": "queued"}
+
+@app.get("/api/downloads/status")
+async def download_status() -> dict[str, Any]:
+    """Return the current download status and queue size."""
+    size_mb = 0.0
+    if current_download["active"] and os.path.exists(current_download["absolute_path"]):
+        size_mb = os.path.getsize(current_download["absolute_path"]) / (1024 * 1024)
+        
+    return {
+        "queue_size": download_queue.qsize(),
+        "current": {
+            "active": current_download["active"],
+            "relative_path": current_download["relative_path"],
+            "downloaded_mb": round(size_mb, 2)
+        }
+    }
+
+
 # ─── /play.m3u8 ──────────────────────────────────────────────────────────────
 
 @app.get("/play.m3u8")

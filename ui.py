@@ -140,6 +140,7 @@ def select_action() -> str:
             questionary.Choice(title="▶️  Play locally", value="PLAY"),
             questionary.Choice(title="🔗  Export to Jellyfin (.strm for streaming)", value="EXPORT"),
             questionary.Choice(title="⬇️  Download to Server (.mkv for offline)", value="DOWNLOAD"),
+            questionary.Choice(title="📊  View Download Status", value="STATUS"),
             questionary.Choice(title="🧹  Delete downloaded files (keep .strm)", value="CLEANUP"),
             questionary.Choice(title="↩   Back", value="BACK"),
         ],
