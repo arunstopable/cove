@@ -178,9 +178,8 @@ async def stream_mkv(title_id: int, episode_id: int, request: Request) -> Stream
         "-map", "0:s?",
         # Stream-copy everything — no re-encoding, fast start
         "-c:v", "copy",
-        "-c:a", "copy",
+        "-c:a", "aac",                      # Re-encode audio to fix AAC extradata/samplerate issues
         "-c:s", "copy",
-        "-bsf:a", "aac_adtstoasc",          # Fixes 'Error parsing AAC extradata' in MKV
         "-f", "matroska",
         "pipe:1",                           # Write MKV to stdout
     ]
