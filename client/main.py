@@ -139,6 +139,8 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             season_dir = os.path.join(base_dir, name, f"Season {season_num:02d}")
             os.makedirs(season_dir, exist_ok=True)
 
+            downloaded_nums = get_downloaded_ep_nums(name, season_num)
+
             season_data = scraper.get_season_details(title_id, slug, season_num)
             episodes = season_data.get("loadedSeason", {}).get("episodes", [])
             for ep in episodes:
@@ -148,13 +150,17 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                     continue
                 ep_name = safe_filename(ep.get("name", f"Episode {ep_num}"))
                 file_name_strm = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.strm"
-                file_name_mkv = f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
                 file_path_strm = os.path.join(season_dir, file_name_strm)
-                file_path_mkv = os.path.join(season_dir, file_name_mkv)
 
-                if os.path.exists(file_path_mkv):
-                    if os.path.exists(file_path_strm):
-                        os.remove(file_path_strm)
+                # If any .mkv exists for this episode, do not create .strm and clean up old .strm
+                if ep_num in downloaded_nums:
+                    # Look for any existing .strm for this episode number and delete it
+                    for f in os.listdir(season_dir):
+                        if f.endswith(".strm") and f"S{season_num:02d}E{ep_num:02d}" in f:
+                            try:
+                                os.remove(os.path.join(season_dir, f))
+                            except OSError:
+                                pass
                     continue
 
                 with open(file_path_strm, "w") as f:
@@ -182,12 +188,17 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         movie_dir = os.path.join(base_dir, name)
         os.makedirs(movie_dir, exist_ok=True)
         file_path_strm = os.path.join(movie_dir, f"{name}.strm")
-        file_path_mkv = os.path.join(movie_dir, f"{name}.mkv")
+        
+        has_mkv = any(f.endswith(".mkv") for f in os.listdir(movie_dir))
 
-        if os.path.exists(file_path_mkv):
-            if os.path.exists(file_path_strm):
-                os.remove(file_path_strm)
-            ui.show_info(f"Skipping export: {name}.mkv already exists.")
+        if has_mkv:
+            for f in os.listdir(movie_dir):
+                if f.endswith(".strm"):
+                    try:
+                        os.remove(os.path.join(movie_dir, f))
+                    except OSError:
+                        pass
+            ui.show_info(f"Skipping export: {name} .mkv already exists.")
             return
 
         with open(file_path_strm, "w") as f:
