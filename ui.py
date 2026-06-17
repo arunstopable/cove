@@ -61,3 +61,13 @@ def select_episode(episodes: list[dict[str, Any]]) -> Union[dict[str, Any], str,
         "Select an episode:",
         choices=_add_back_option(choices),
     ).ask()
+
+def select_action() -> str:
+    return questionary.select(
+        "What do you want to do?",
+        choices=[
+            questionary.Choice(title="Play Locally (IINA)", value="PLAY"),
+            questionary.Choice(title="Export to Jellyfin (.strm)", value="EXPORT"),
+            questionary.Choice(title="[Back]", value="BACK")
+        ]
+    ).ask()

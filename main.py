@@ -10,6 +10,77 @@ import ui
 from sc_scraper import SCScraper
 
 import concurrent.futures
+import re
+
+def safe_filename(name: str) -> str:
+    return re.sub(r'[\\/*?:"<>|]', "", name).strip()
+
+def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
+    base_dir = os.path.join(os.getcwd(), "JellyfinMedia")
+    title_id = sc_title['id']
+    name = safe_filename(sc_title.get('name', 'Unknown'))
+    
+    if sc_title.get('type') == 'tv':
+        shows_dir = os.path.join(base_dir, "Shows", name)
+        os.makedirs(shows_dir, exist_ok=True)
+        
+        with ui.show_spinner(f"Fetching details for {name}...") as progress:
+            task = progress.add_task("Fetching", total=None)
+            details = scraper.get_title_details(title_id, sc_title.get('slug', ''))
+            
+        seasons = details.get('title', {}).get('seasons', [])
+        if not seasons:
+            rprint("[red]No seasons found.[/red]")
+            return
+            
+        for season in seasons:
+            season_num = season.get('number', 1)
+            season_dir = os.path.join(shows_dir, f"Season {season_num:02d}")
+            os.makedirs(season_dir, exist_ok=True)
+            
+            with ui.show_spinner(f"Exporting Season {season_num}...") as progress:
+                task = progress.add_task("Exporting", total=None)
+                season_data = scraper.get_season_details(title_id, sc_title.get('slug', ''), season_num)
+                episodes = season_data.get('loadedSeason', {}).get('episodes', [])
+                
+                for ep in episodes:
+                    ep_num = ep.get('number', 0)
+                    ep_id = ep['id']
+                    ep_name = safe_filename(ep.get('name', f"Episode {ep_num}"))
+                    
+                    strm_path = os.path.join(season_dir, f"{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.strm")
+                    with open(strm_path, "w", encoding="utf-8") as f:
+                        f.write(f"http://127.0.0.1:8000/play?title_id={title_id}&episode_id={ep_id}")
+                        
+        rprint(f"[green]Successfully exported TV Show: {name}[/green]")
+        rprint(f"[dim]Saved to: {shows_dir}[/dim]")
+        
+    else: # Movie
+        movies_dir = os.path.join(base_dir, "Movies", name)
+        os.makedirs(movies_dir, exist_ok=True)
+        
+        with ui.show_spinner("Exporting movie...") as progress:
+            task = progress.add_task("Exporting", total=None)
+            details = scraper.get_title_details(title_id, sc_title.get('slug', ''))
+            
+            ep_id = None
+            try:
+                ep_id = details.get('title', {}).get('episodes', [{}])[0].get('id')
+                if not ep_id:
+                    ep_id = details.get('loadedSeason', {}).get('episodes', [{}])[0].get('id')
+            except Exception:
+                pass
+                
+            if not ep_id:
+                rprint("[red]Could not find movie episode ID for export.[/red]")
+                return
+                
+            strm_path = os.path.join(movies_dir, f"{name}.strm")
+            with open(strm_path, "w", encoding="utf-8") as f:
+                f.write(f"http://127.0.0.1:8000/play?title_id={title_id}&episode_id={ep_id}")
+                
+        rprint(f"[green]Successfully exported Movie: {name}[/green]")
+        rprint(f"[dim]Saved to: {movies_dir}[/dim]")
 
 def download_sub(sub: dict[str, str]) -> Optional[str]:
     try:
@@ -161,10 +232,18 @@ def main() -> None:
             continue
             
         sc_title_search = selected_res
-        if sc_title_search.get('type') == 'tv':
-            handle_tv_show(scraper, sc_title_search)
-        else:
-            handle_movie(scraper, sc_title_search)
+        
+        action = ui.select_action()
+        if not action or action == "BACK":
+            continue
+            
+        if action == "EXPORT":
+            export_media(scraper, sc_title_search)
+        elif action == "PLAY":
+            if sc_title_search.get('type') == 'tv':
+                handle_tv_show(scraper, sc_title_search)
+            else:
+                handle_movie(scraper, sc_title_search)
 
 if __name__ == "__main__":
     try:
