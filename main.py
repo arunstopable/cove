@@ -28,10 +28,10 @@ def safe_filename(name: str) -> str:
 
 
 def _strm_url(title_id: int, episode_id: int) -> str:
-    """Build the .strm content URL pointing to the proxy /stream.mkv endpoint."""
+    """Build the .strm content URL pointing to the proxy /play.m3u8 endpoint (HLS)."""
     return (
         f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}"
-        f"/stream.mkv?title_id={title_id}&episode_id={episode_id}"
+        f"/play.m3u8?title_id={title_id}&episode_id={episode_id}"
     )
 
 
@@ -160,6 +160,140 @@ def _export_movie(
         rprint(f"  [dim]Path:[/dim] {strm_path}")
     else:
         rprint(f"[yellow]'{name}.strm' already exists — skipped.[/yellow]")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Offline Download & Cleanup
+# ──────────────────────────────────────────────────────────────────────────────
+
+import httpx
+
+def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
+    """Send requests to the proxy server to download the physical MKV files."""
+    is_tv = sc_title.get("type") == "tv"
+    name = safe_filename(sc_title.get("name", "Unknown"))
+    title_id: int = sc_title["id"]
+    slug: str = sc_title.get("slug", "")
+
+    if is_tv:
+        with ui.spinner(f"Fetching details for {name}…"):
+            details = scraper.get_title_details(title_id, slug)
+        
+        seasons = details.get("title", {}).get("seasons", [])
+        if not seasons:
+            rprint("[red]No seasons found.[/red]")
+            return
+            
+        scope = ui.select_scope(name, seasons)
+        if not scope or scope == "BACK":
+            return
+            
+        target_seasons = seasons if scope == "ALL" else [scope]
+        
+        queued = 0
+        for season in target_seasons:
+            season_num: int = season.get("number", 1)
+            with ui.spinner(f"Queueing Season {season_num}…"):
+                season_data = scraper.get_season_details(title_id, slug, season_num)
+                episodes = season_data.get("loadedSeason", {}).get("episodes", [])
+                
+                for ep in episodes:
+                    ep_num: int = ep.get("number", 0)
+                    ep_id: Optional[int] = ep.get("id")
+                    if not ep_id: continue
+                    
+                    ep_name = safe_filename(ep.get("name", f"Episode {ep_num}"))
+                    rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
+                    if _queue_download(title_id, ep_id, "tv", rel_path):
+                        queued += 1
+                        
+        rprint(f"\n[bold green]✓ Queued {queued} episodes for background download on the server![/bold green]")
+        
+    else:
+        # Movie
+        with ui.spinner(f"Fetching details for {name}…"):
+            details = scraper.get_title_details(title_id, slug)
+        ep_id: Optional[int] = None
+        episodes_direct = details.get("title", {}).get("episodes", [])
+        if episodes_direct: ep_id = episodes_direct[0].get("id")
+        if not ep_id:
+            fallback = details.get("loadedSeason", {}).get("episodes", [])
+            if fallback: ep_id = fallback[0].get("id")
+            
+        if not ep_id:
+            rprint(f"[red]Could not find episode ID for '[cyan]{name}[/cyan]'.[/red]")
+            return
+            
+        rel_path = f"{name}/{name}.mkv"
+        with ui.spinner(f"Queueing {name}…"):
+            if _queue_download(title_id, ep_id, "movie", rel_path):
+                rprint(f"\n[bold green]✓ Queued movie for background download on the server![/bold green]")
+
+
+def _queue_download(title_id: int, episode_id: int, media_type: str, relative_path: str) -> bool:
+    url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/download"
+    payload = {
+        "title_id": title_id,
+        "episode_id": episode_id,
+        "type": media_type,
+        "relative_path": relative_path
+    }
+    try:
+        r = httpx.post(url, json=payload, timeout=5.0)
+        if r.status_code == 200:
+            return True
+        rprint(f"[red]Server returned error: {r.text}[/red]")
+        return False
+    except Exception as e:
+        rprint(f"[red]Failed to contact proxy server: {e}[/red]")
+        return False
+
+
+import glob
+
+def cleanup_offline(sc_title: dict[str, Any]) -> None:
+    """Delete physical MKV files from the local NFS mount to free space."""
+    is_tv = sc_title.get("type") == "tv"
+    base_dir = config.NFS_SHOWS_PATH if is_tv else config.NFS_MOVIES_PATH
+    name = safe_filename(sc_title.get("name", "Unknown"))
+    
+    target_dir = os.path.join(base_dir, name)
+    if not os.path.exists(target_dir):
+        rprint(f"[yellow]Directory not found: {target_dir}[/yellow]")
+        return
+
+    if is_tv:
+        # Ask which season to clean
+        import ui
+        seasons_dirs = sorted(glob.glob(os.path.join(target_dir, "Season *")))
+        if not seasons_dirs:
+            rprint("[yellow]No seasons found.[/yellow]")
+            return
+            
+        choices = ["ALL"] + [os.path.basename(d) for d in seasons_dirs]
+        import questionary
+        scope = questionary.select(f"Which season of {name} to cleanup?", choices=choices + ["BACK"]).ask()
+        if not scope or scope == "BACK": return
+        
+        search_path = os.path.join(target_dir, "**", "*.mkv") if scope == "ALL" else os.path.join(target_dir, scope, "*.mkv")
+    else:
+        search_path = os.path.join(target_dir, "*.mkv")
+
+    mkv_files = glob.glob(search_path, recursive=True)
+    if not mkv_files:
+        rprint("[yellow]No .mkv files found to delete.[/yellow]")
+        return
+        
+    confirm = questionary.confirm(f"Are you sure you want to delete {len(mkv_files)} .mkv file(s)? (.strm will be kept)").ask()
+    if confirm:
+        deleted = 0
+        for f in mkv_files:
+            try:
+                os.remove(f)
+                deleted += 1
+            except Exception as e:
+                rprint(f"[red]Failed to delete {f}: {e}[/red]")
+        rprint(f"[bold green]✓ Deleted {deleted} file(s).[/bold green]")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -347,6 +481,10 @@ def main() -> None:
 
         if action == "EXPORT":
             export_media(scraper, selected)
+        elif action == "DOWNLOAD":
+            download_offline(scraper, selected)
+        elif action == "CLEANUP":
+            cleanup_offline(selected)
         elif action == "PLAY":
             if selected.get("type") == "tv":
                 handle_tv_show(scraper, selected)

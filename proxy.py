@@ -20,8 +20,10 @@ import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Optional
+import os
 
 import httpx
+from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -52,7 +54,61 @@ _stream_cache: dict[tuple[int, int], tuple[str, datetime]] = {}
 _CACHE_TTL = timedelta(minutes=4)  # Vixcloud tokens expire after ~5 minutes
 
 VIXCLOUD_REFERER = "https://vixcloud.co/"
-FFMPEG_CHUNK_BYTES = 65_536  # 64 KB per read
+
+# Download Queue
+download_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+async def download_worker() -> None:
+    """Background task to process downloads sequentially."""
+    while True:
+        try:
+            task = await download_queue.get()
+            title_id = task["title_id"]
+            episode_id = task["episode_id"]
+            media_type = task["type"]
+            rel_path = task["relative_path"]
+            
+            base_path = config.SERVER_SHOWS_PATH if media_type == "tv" else config.SERVER_MOVIES_PATH
+            out_path = os.path.join(base_path, rel_path)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            
+            log.info(f"[DOWNLOAD] Extracting URL for {title_id} / {episode_id}")
+            m3u8_url = await _get_stream_url(title_id, episode_id)
+            if not m3u8_url:
+                log.error(f"[DOWNLOAD] Failed to extract URL for {out_path}")
+                download_queue.task_done()
+                continue
+                
+            log.info(f"[DOWNLOAD] Starting ffmpeg to {out_path}")
+            
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-v", "error", 
+                "-allowed_extensions", "ALL", 
+                "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+                "-headers", f"Referer: {VIXCLOUD_REFERER}\r\n",
+                "-i", m3u8_url,
+                "-map", "0:v:0", "-map", "0:a", "-map", "0:s?",
+                "-c:v", "copy", "-c:a", "aac", "-c:s", "copy",
+                "-f", "matroska", out_path
+            ]
+            
+            proc = await asyncio.create_subprocess_exec(*ffmpeg_cmd)
+            await proc.wait()
+            
+            if proc.returncode == 0:
+                log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
+            else:
+                log.error(f"[DOWNLOAD] ✗ Failed with code {proc.returncode}: {out_path}")
+                
+            download_queue.task_done()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.error(f"[DOWNLOAD] Worker error: {e}")
+            try:
+                download_queue.task_done()
+            except ValueError:
+                pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -64,8 +120,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log.info("Initializing SCScraper session…")
     await asyncio.to_thread(scraper.init_session)
     log.info(f"Active domain: {scraper.active_domain}")
+    
+    worker_task = asyncio.create_task(download_worker())
+    
     yield
+    
     log.info("Shutting down — closing HTTP client…")
+    worker_task.cancel()
     scraper.close()
 
 
@@ -142,85 +203,24 @@ async def health() -> dict[str, Any]:
         "session_valid": scraper._session_valid,
         "session_age_seconds": age,
         "cache_entries": len(_stream_cache),
+        "download_queue_size": download_queue.qsize(),
     }
 
 
-# ─── /stream.mkv ─────────────────────────────────────────────────────────────
+# ─── /api/download ────────────────────────────────────────────────────────────
 
-@app.get("/stream.mkv")
-async def stream_mkv(title_id: int, episode_id: int, request: Request) -> StreamingResponse:
-    """
-    Stream the requested episode as a Matroska (.mkv) container via ffmpeg.
+class DownloadRequest(BaseModel):
+    title_id: int
+    episode_id: int
+    type: str
+    relative_path: str
 
-    ffmpeg reads the live HLS stream from Vixcloud (no disk I/O) and pipes the
-    muxed output directly to the HTTP response.  All available audio and subtitle
-    tracks are preserved with stream-copy (no re-encoding).
-
-    This endpoint is the primary target for Jellyfin .strm files and enables
-    Streamyfin offline downloads (full file, not just the M3U8 manifest).
-    """
-    m3u8_url = await _get_stream_url(title_id, episode_id)
-    if not m3u8_url:
-        raise HTTPException(status_code=404, detail="Stream not found or extraction failed.")
-
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-y",                               # Overwrite outputs without asking
-        "-loglevel", "error",               # Suppress verbose output; only log errors
-        "-allowed_extensions", "ALL",       # Allow all file extensions in HLS
-        "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-        "-headers", f"Referer: {VIXCLOUD_REFERER}\r\n",
-        "-i", m3u8_url,
-        # Map first video stream, all audio streams, all subtitle streams
-        # The '?' on subtitles means "don't fail if none are present"
-        "-map", "0:v:0",
-        "-map", "0:a",
-        "-map", "0:s?",
-        # Stream-copy everything — no re-encoding, fast start
-        "-c:v", "copy",
-        "-c:a", "aac",                      # Re-encode audio to fix AAC extradata/samplerate issues
-        "-c:s", "copy",
-        "-f", "matroska",
-        "pipe:1",                           # Write MKV to stdout
-    ]
-
-    log.info(f"ffmpeg start — title={title_id} episode={episode_id}")
-
-    async def _generate() -> AsyncIterator[bytes]:
-        process = await asyncio.create_subprocess_exec(
-            *ffmpeg_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            while True:
-                # Abort immediately if the client disconnected
-                if await request.is_disconnected():
-                    log.info("Client disconnected — terminating ffmpeg.")
-                    break
-                chunk = await process.stdout.read(FFMPEG_CHUNK_BYTES)
-                if not chunk:
-                    break
-                yield chunk
-        except asyncio.CancelledError:
-            log.info("Stream cancelled — killing ffmpeg.")
-            raise
-        finally:
-            if process.returncode is None:
-                process.kill()
-            await process.wait()
-            if config.DEBUG:
-                stderr_bytes = await process.stderr.read()
-                if stderr_bytes:
-                    log.debug(f"ffmpeg stderr:\n{stderr_bytes.decode(errors='replace')}")
-
-    return StreamingResponse(
-        _generate(),
-        media_type="video/x-matroska",
-        headers={"Content-Disposition": 'inline; filename="stream.mkv"'},
-    )
-
-
+@app.post("/api/download")
+async def queue_download(req: DownloadRequest) -> dict[str, str]:
+    """Queue a media file for background downloading via ffmpeg."""
+    await download_queue.put(req.model_dump())
+    log.info(f"Queued download: {req.relative_path} (Queue size: {download_queue.qsize()})")
+    return {"status": "queued"}
 # ─── /play.m3u8 ──────────────────────────────────────────────────────────────
 
 @app.get("/play.m3u8")

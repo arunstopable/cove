@@ -137,8 +137,25 @@ def select_action() -> str:
     return questionary.select(
         "What do you want to do?",
         choices=[
-            questionary.Choice(title="▶   Play locally", value="PLAY"),
-            questionary.Choice(title="📁  Export to Jellyfin (.strm)", value="EXPORT"),
+            questionary.Choice(title="▶️  Play locally", value="PLAY"),
+            questionary.Choice(title="🔗  Export to Jellyfin (.strm for streaming)", value="EXPORT"),
+            questionary.Choice(title="⬇️  Download to Server (.mkv for offline)", value="DOWNLOAD"),
+            questionary.Choice(title="🧹  Delete downloaded files (keep .strm)", value="CLEANUP"),
             questionary.Choice(title="↩   Back", value="BACK"),
         ],
     ).ask()
+
+
+def select_scope(show_name: str, seasons: list[dict[str, Any]]) -> Union[str, dict[str, Any], None]:
+    choices: list[questionary.Choice] = [
+        questionary.Choice(title=f"All Seasons of {show_name}", value="ALL")
+    ]
+    
+    for s in seasons:
+        num = s.get("number", "?")
+        eps = s.get("episodes_count", 0)
+        label = f"Season {num}  ({eps} episode{'s' if eps != 1 else ''})"
+        choices.append(questionary.Choice(title=label, value=s))
+
+    choices.append(_back())
+    return questionary.select("Select scope:", choices=choices).ask()
