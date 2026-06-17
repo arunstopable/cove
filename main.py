@@ -53,9 +53,7 @@ def play_stream(url: str, subs: Optional[list[dict[str, str]]] = None) -> None:
     except Exception as e:
         rprint(f"[bold red]Failed to launch IINA: {e}[/bold red]")
 
-def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any], watched_episodes: Optional[set[tuple[int, int]]] = None) -> None:
-    if watched_episodes is None:
-        watched_episodes = set()
+def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
     with ui.show_spinner("Fetching show details...") as progress:
         task = progress.add_task("Fetching", total=None)
@@ -84,10 +82,7 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any], watched_episode
                 
             episodes = season_data.get('loadedSeason', {}).get('episodes', [])
             
-            # Mark watched
-            for ep in episodes:
-                ep_num = ep.get('number', 0)
-                ep['is_watched'] = (season_num, ep_num) in watched_episodes
+            # No watched tracking
                 
             while True:
                 episode = ui.select_episode(episodes)
@@ -167,7 +162,7 @@ def main() -> None:
             
         sc_title_search = selected_res
         if sc_title_search.get('type') == 'tv':
-            handle_tv_show(scraper, sc_title_search, set())
+            handle_tv_show(scraper, sc_title_search)
         else:
             handle_movie(scraper, sc_title_search)
 

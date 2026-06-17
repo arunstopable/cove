@@ -47,19 +47,13 @@ def select_season(seasons: list[dict[str, Any]]) -> Union[dict[str, Any], str, N
         choices=_add_back_option(choices),
     ).ask()
 
-def select_episode(episodes: list[dict[str, Any]], watched_eps: Optional[set[tuple[int, int]]] = None) -> Union[dict[str, Any], str, None]:
-    if watched_eps is None:
-        watched_eps = set()
-        
+def select_episode(episodes: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
     choices = []
     for ep in episodes:
         ep_num = ep.get('number', 0)
         
         title = f"Ep {ep_num}: {ep.get('name', 'Untitled')}"
-        if ep.get('is_watched'):
-            title = f"✓ {title}"
-        else:
-            title = f"  {title}"
+
             
         choices.append(questionary.Choice(title=title, value=ep))
         
