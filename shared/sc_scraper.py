@@ -192,6 +192,53 @@ class SCScraper:
         if self._is_session_stale():
             self.init_session()
 
+    def check_global_quality(self) -> str:
+        """
+        Tests a known high-quality title (e.g. 'Fallout') to determine the maximum
+        resolution currently granted by Vixcloud for this session.
+        Returns '1080p', '720p', etc.
+        """
+        try:
+            titles = self.search("Fallout")
+            if not titles: return "Unknown"
+            
+            title_id = titles[0]['id']
+            slug = titles[0]['slug']
+            details = self.get_title_details(title_id, slug)
+            
+            ep_id = details.get("loadedSeason", {}).get("episodes", [{}])[0].get("id")
+            if not ep_id:
+                ep_id = details.get("title", {}).get("episodes", [{}])[0].get("id")
+            if not ep_id: return "Unknown"
+            
+            iframe_url = f"{self.active_domain}/it/iframe/{title_id}?episode_id={ep_id}&next_episode=1"
+            iframe_resp = self._get(iframe_url, headers={'Referer': f"{self.active_domain}/it/watch/{title_id}?e={ep_id}"})
+            
+            import re
+            embed_match = re.search(r'src=[\"\']+(https://vixcloud\.co/embed/[^\"\']+)[\"\']', iframe_resp.text)
+            if not embed_match: return "Unknown"
+            
+            embed_url = embed_match.group(1).replace('&amp;', '&')
+            vix_resp = self._get(embed_url, headers={'Referer': f"{self.active_domain}/"})
+            
+            token_match = re.search(r'\'token\': \'([^\']+)\'', vix_resp.text)
+            expires_match = re.search(r'\'expires\': \'([^\']+)\'', vix_resp.text)
+            playlist_match = re.search(r'url:\s*\'(https://vixcloud\.co/playlist/\d+)\'', vix_resp.text)
+            
+            if not (token_match and expires_match and playlist_match): return "Unknown"
+            
+            master_url = f"{playlist_match.group(1)}?ub=1&token={token_match.group(1)}&expires={expires_match.group(1)}"
+            resp = self._get(master_url, headers={'Referer': 'https://vixcloud.co/', 'User-Agent': self.client.headers.get("User-Agent")})
+            
+            max_h = 0
+            for line in resp.text.splitlines():
+                res = re.search(r'RESOLUTION=\d+x(\d+)', line)
+                if res:
+                    max_h = max(max_h, int(res.group(1)))
+            return f"{max_h}p" if max_h else "Unknown"
+        except Exception:
+            return "Unknown"
+
     # ------------------------------------------------------------------
     # Internal: Inertia requests
     # ------------------------------------------------------------------
