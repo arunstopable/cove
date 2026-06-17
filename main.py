@@ -16,12 +16,21 @@ def safe_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
 def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
-    base_dir = os.path.join(os.getcwd(), "JellyfinMedia")
+    if sc_title.get('type') == 'tv':
+        base_dir = "/Volumes/Logan/shows"
+    else:
+        base_dir = "/Volumes/Logan/movies"
+        
+    if not os.path.exists(base_dir):
+        rprint(f"[bold red]Error: The network volume '{base_dir}' is not mounted.[/bold red]")
+        rprint("[yellow]Please mount your NFS volumes first and try again.[/yellow]")
+        return
+        
     title_id = sc_title['id']
     name = safe_filename(sc_title.get('name', 'Unknown'))
     
     if sc_title.get('type') == 'tv':
-        shows_dir = os.path.join(base_dir, "Shows", name)
+        shows_dir = os.path.join(base_dir, name)
         os.makedirs(shows_dir, exist_ok=True)
         
         with ui.show_spinner(f"Fetching details for {name}...") as progress:
@@ -56,7 +65,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         rprint(f"[dim]Saved to: {shows_dir}[/dim]")
         
     else: # Movie
-        movies_dir = os.path.join(base_dir, "Movies", name)
+        movies_dir = os.path.join(base_dir, name)
         os.makedirs(movies_dir, exist_ok=True)
         
         with ui.show_spinner("Exporting movie...") as progress:
