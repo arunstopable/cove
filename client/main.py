@@ -4,16 +4,48 @@ import asyncio
 import os
 import re
 import sys
-from typing import Any, Optional
-import urllib.parse
 import glob
+import time
+import contextlib
+from typing import Any, Optional, Generator
+import urllib.parse
 
 import httpx
 from rich import print as rprint
 
-import config
-import ui
-from sc_scraper import SCScraper
+from shared import config
+from client import ui
+from shared.sc_scraper import SCScraper
+
+server_online = False
+local_proxy_running = False
+
+@contextlib.contextmanager
+def local_proxy() -> Generator[str, None, None]:
+    """Launch a temporary uvicorn proxy on localhost and yield its base URL."""
+    global local_proxy_running
+    if server_online:
+        yield f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}"
+        return
+
+    import subprocess
+    ui.show_info("Starting temporary local proxy for offline streaming...")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "proxy.main:app", "--host", "127.0.0.1", "--port", "8001"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    local_proxy_running = True
+    try:
+        # Give it a second to boot
+        import time
+        time.sleep(1)
+        yield "http://127.0.0.1:8001"
+    finally:
+        ui.show_info("Shutting down temporary local proxy...")
+        proc.terminate()
+        proc.wait(timeout=3)
+        local_proxy_running = False
 
 
 def safe_filename(name: str) -> str:
@@ -21,12 +53,9 @@ def safe_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
 
-def _strm_url(title_id: int, episode_id: int) -> str:
-    """Build the .strm content URL pointing to the proxy /play.m3u8 endpoint (HLS)."""
-    return (
-        f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}"
-        f"/play.m3u8?title_id={title_id}&episode_id={episode_id}"
-    )
+def _strm_url(base_url: str, title_id: int, episode_id: int) -> str:
+    """Build the .strm content URL pointing to the active proxy /play.m3u8 endpoint."""
+    return f"{base_url}/play.m3u8?title_id={title_id}&episode_id={episode_id}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -125,7 +154,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                 file_path = os.path.join(season_dir, file_name)
 
                 with open(file_path, "w") as f:
-                    f.write(_strm_url(title_id, ep_id))
+                    f.write(_strm_url(f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}", title_id, ep_id))
 
         ui.show_success(f"Exported {name} to {base_dir}")
 
@@ -151,7 +180,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         file_path = os.path.join(movie_dir, f"{name}.strm")
 
         with open(file_path, "w") as f:
-            f.write(_strm_url(title_id, ep_id))
+            f.write(_strm_url(f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}", title_id, ep_id))
 
         ui.show_success(f"Exported {name} to {movie_dir}")
 
@@ -417,22 +446,36 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
         play_target = os.path.join(config.NFS_SHOWS_PATH, rel_path)
         ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
-    else:
-        play_target = _strm_url(title_id, ep_id)
-        ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
-    
-    import subprocess
-    if config.PLAYER_APP.lower() == "iina":
-        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
-    elif config.PLAYER_APP.lower() == "vlc":
-        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
-    else:
-        cmd = [config.PLAYER_APP, play_target]
+        
+        import subprocess
+        if config.PLAYER_APP.lower() == "iina":
+            cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
+        elif config.PLAYER_APP.lower() == "vlc":
+            cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+        else:
+            cmd = [config.PLAYER_APP, play_target]
 
-    try:
-        subprocess.run(cmd, check=False)
-    except FileNotFoundError:
-        ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
+        try:
+            subprocess.run(cmd, check=False)
+        except FileNotFoundError:
+            ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
+    else:
+        with local_proxy() as base_url:
+            play_target = _strm_url(base_url, title_id, ep_id)
+            ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
+            
+            import subprocess
+            if config.PLAYER_APP.lower() == "iina":
+                cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
+            elif config.PLAYER_APP.lower() == "vlc":
+                cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+            else:
+                cmd = [config.PLAYER_APP, play_target]
+
+            try:
+                subprocess.run(cmd, check=False)
+            except FileNotFoundError:
+                ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
 
 
 def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
@@ -462,22 +505,36 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     if os.path.exists(phys_path):
         play_target = phys_path
         ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
-    else:
-        play_target = _strm_url(title_id, ep_id)
-        ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
+        
+        import subprocess
+        if config.PLAYER_APP.lower() == "iina":
+            cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
+        elif config.PLAYER_APP.lower() == "vlc":
+            cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+        else:
+            cmd = [config.PLAYER_APP, play_target]
 
-    import subprocess
-    if config.PLAYER_APP.lower() == "iina":
-        cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
-    elif config.PLAYER_APP.lower() == "vlc":
-        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+        try:
+            subprocess.run(cmd, check=False)
+        except FileNotFoundError:
+            ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
     else:
-        cmd = [config.PLAYER_APP, play_target]
+        with local_proxy() as base_url:
+            play_target = _strm_url(base_url, title_id, ep_id)
+            ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
 
-    try:
-        subprocess.run(cmd, check=False)
-    except FileNotFoundError:
-        ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
+            import subprocess
+            if config.PLAYER_APP.lower() == "iina":
+                cmd = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--keep-running", play_target]
+            elif config.PLAYER_APP.lower() == "vlc":
+                cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+            else:
+                cmd = [config.PLAYER_APP, play_target]
+
+            try:
+                subprocess.run(cmd, check=False)
+            except FileNotFoundError:
+                ui.show_error(f"Player executable not found: {config.PLAYER_APP}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -485,15 +542,24 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global server_online
+    ui.clear_screen()
+    with ui.spinner("Checking server status..."):
+        try:
+            r = httpx.get(f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/health", timeout=1.0)
+            server_online = (r.status_code == 200)
+        except Exception:
+            server_online = False
+
     scraper = SCScraper()
     scraper.init_session()
 
     try:
         while True:
             ui.clear_screen()
-            ui.print_header()
+            ui.print_header(server_online)
 
-            main_action = ui.select_main_menu()
+            main_action = ui.select_main_menu(server_online)
             if not main_action or main_action == "EXIT":
                 ui.show_info("Goodbye.")
                 break
@@ -552,13 +618,13 @@ def main() -> None:
             # Title selected -> Action menu
             while True:
                 ui.clear_screen()
-                ui.print_header()
+                ui.print_header(server_online)
                 
                 name = selected.get("name", "Unknown")
                 kind = "TV" if selected.get("type") == "tv" else "Movie"
                 ui.show_info(f"Selected: {name} ({kind})")
 
-                action = ui.select_action()
+                action = ui.select_action(server_online)
                 if not action or action == "BACK":
                     break
 

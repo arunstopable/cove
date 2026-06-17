@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 import httpx
 
-import config
+from shared import config
 
 
 class SCScraper:

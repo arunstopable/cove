@@ -11,6 +11,8 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
 
+from shared import config
+
 console = Console()
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -46,17 +48,17 @@ def clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def print_header() -> None:
-    """Print the minimalist Cove logo centered on the screen."""
-    console.print(
-        Panel.fit(
-            f"[bold {APPLE_BLUE}]C O V E[/]\n"
-            f"[dim {DIM_GRAY}]Streaming Environment[/]",
-            border_style=BORDER_GRAY,
-            padding=(1, 4),
-        ),
-        justify="center"
-    )
+def print_header(server_online: bool = True) -> None:
+    logo = """[bold white]
+   ██████╗ ██████╗ ██╗   ██╗███████╗
+  ██╔════╝██╔═══██╗██║   ██║██╔════╝
+  ██║     ██║   ██║██║   ██║█████╗  
+  ██║     ██║   ██║╚██╗ ██╔╝██╔══╝  
+  ╚██████╗╚██████╔╝ ╚████╔╝ ███████╗
+   ╚═════╝ ╚═════╝   ╚═══╝  ╚══════╝
+[/]"""
+    status_badge = f"[bold green]● Server Online[/]" if server_online else f"[bold red]○ Server Offline[/]"
+    console.print(Panel(logo.strip() + f"\n\n  {status_badge}", border_style=BORDER_GRAY, expand=False))
     console.print()
 
 
@@ -116,15 +118,20 @@ def ask_search_query() -> str:
     ).ask()
 
 
-def select_main_menu() -> str:
+def select_main_menu(server_online: bool = True) -> str:
+    choices = [
+        questionary.Choice(title="  Search Title", value="SEARCH"),
+        questionary.Choice(title="  My Library", value="LIBRARY"),
+    ]
+    if server_online:
+        choices.extend([
+            questionary.Choice(title="  View Download Status", value="STATUS"),
+        ])
+    choices.append(questionary.Choice(title="  Exit", value="EXIT"))
+    
     return questionary.select(
         "Main Menu:",
-        choices=[
-            questionary.Choice(title="  Search New Title", value="SEARCH"),
-            questionary.Choice(title="  My Library", value="LIBRARY"),
-            questionary.Choice(title="  View Download Status", value="STATUS"),
-            questionary.Choice(title="  Exit", value="EXIT"),
-        ],
+        choices=choices,
         style=cove_style,
         qmark="",
         pointer="❯",
@@ -185,16 +192,21 @@ def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, An
     ).ask()
 
 
-def select_action() -> str:
+def select_action(server_online: bool = True) -> str:
+    choices = [
+        questionary.Choice(title="  Play Locally", value="PLAY"),
+    ]
+    if server_online:
+        choices.extend([
+            questionary.Choice(title="  Download Offline", value="DOWNLOAD"),
+            questionary.Choice(title="  Export to Jellyfin", value="EXPORT"),
+            questionary.Choice(title="  Cleanup Physical Files", value="CLEANUP"),
+        ])
+    choices.append(_back())
+    
     return questionary.select(
         "Action:",
-        choices=[
-            questionary.Choice(title="  Play Locally", value="PLAY"),
-            questionary.Choice(title="  Export to Jellyfin (.strm)", value="EXPORT"),
-            questionary.Choice(title="  Download Offline (.mkv)", value="DOWNLOAD"),
-            questionary.Choice(title="  Delete Downloaded Files", value="CLEANUP"),
-            _back(),
-        ],
+        choices=choices,
         style=cove_style,
         qmark="",
         pointer="❯",

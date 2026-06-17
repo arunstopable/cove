@@ -28,8 +28,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-import config
-from sc_scraper import SCScraper
+from shared import config
+from shared.sc_scraper import SCScraper
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -257,7 +257,11 @@ async def download_status() -> dict[str, Any]:
     }
 
 
-# ─── /play.m3u8 ──────────────────────────────────────────────────────────────
+@app.get("/health")
+async def health_check() -> dict[str, str]:
+    """Health check for the proxy server."""
+    return {"status": "ok"}
+
 
 @app.get("/play.m3u8")
 async def play_m3u8(title_id: int, episode_id: int, request: Request) -> Response:
