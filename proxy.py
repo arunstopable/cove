@@ -2,6 +2,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
 import httpx
 import urllib.parse
+import re
 
 from sc_scraper import SCScraper
 
@@ -46,6 +47,14 @@ def play_stream(request: Request, title_id: int, episode_id: int):
                 if line.startswith("http"):
                     encoded_url = urllib.parse.quote(line)
                     modified_lines.append(f"/proxy_child?url={encoded_url}")
+                elif line.startswith("#EXT-X-MEDIA:"):
+                    match = re.search(r'URI="([^"]+)"', line)
+                    if match:
+                        original_uri = match.group(1)
+                        encoded_url = urllib.parse.quote(original_uri)
+                        new_uri = f"/proxy_child?url={encoded_url}"
+                        line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
+                    modified_lines.append(line)
                 else:
                     modified_lines.append(line)
                     
