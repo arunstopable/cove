@@ -350,12 +350,14 @@ def select_episode(
 
 
 def select_episodes_multi(
-    episodes: list[dict[str, Any]], downloaded_ids: set[int] = None
+    episodes: list[dict[str, Any]], downloaded_ids: set[int] = None, downloading_ids: set[int] = None
 ) -> list[dict[str, Any]]:
     """Multi-select checkbox for downloading specific episodes."""
     choices: list[questionary.Choice] = []
     if downloaded_ids is None:
         downloaded_ids = set()
+    if downloading_ids is None:
+        downloading_ids = set()
 
     for ep in episodes:
         num: int = ep.get("number", 0)
@@ -371,6 +373,16 @@ def select_episodes_multi(
             )
             choices.append(
                 questionary.Choice(title=label, value=ep, disabled="Already downloaded")
+            )
+        elif ep_id in downloading_ids:
+            # Downloading
+            label = FormattedText(
+                [
+                    ("class:ansiyellow", f"Ep {num:02d}: {title} (Downloading...)"),
+                ]
+            )
+            choices.append(
+                questionary.Choice(title=label, value=ep, disabled="Currently downloading")
             )
         else:
             label = FormattedText(

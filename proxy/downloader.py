@@ -42,6 +42,7 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
                 "relative_path": rel_path,
                 "absolute_path": out_path,
                 "part_path": part_path,
+                "episode_id": episode_id,
             }
 
             log.info(f"[DOWNLOAD] Extracting URL for {title_id} / {episode_id}")

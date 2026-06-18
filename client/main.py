@@ -113,6 +113,26 @@ def get_downloaded_ep_nums(show_name: str, season_num: int) -> set[int]:
     return nums
 
 
+def get_downloading_ep_ids() -> set[int]:
+    """Fetch the currently downloading and queued episode IDs from the proxy."""
+    try:
+        url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/status"
+        r = httpx.get(url, timeout=2.0)
+        if r.status_code == 200:
+            data = r.json()
+            ids = set()
+            for ad in data.get("active_downloads", []):
+                if ad.get("episode_id"):
+                    ids.add(ad["episode_id"])
+            for qi in data.get("queue_items", []):
+                if isinstance(qi, dict) and qi.get("episode_id"):
+                    ids.add(qi["episode_id"])
+            return ids
+    except Exception:
+        pass
+    return set()
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Export (.strm)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -288,8 +308,9 @@ def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                         for ep in episodes
                         if ep.get("number") in downloaded_nums and "id" in ep
                     }
+                    downloading_ids = get_downloading_ep_ids()
 
-                    target_episodes = ui.select_episodes_multi(episodes, downloaded_ids)
+                    target_episodes = ui.select_episodes_multi(episodes, downloaded_ids, downloading_ids)
                     if not target_episodes:
                         return
 
@@ -435,7 +456,8 @@ def show_download_status() -> None:
                 queue_items = data.get("queue_items", [])
                 if queue_items:
                     for idx, item in enumerate(queue_items, 1):
-                        lines.append(f"  {idx}. [dim]{item}[/]")
+                        name = item.get("relative_path", "Unknown") if isinstance(item, dict) else item
+                        lines.append(f"  {idx}. [dim]{name}[/]")
 
                 return Panel(
                     "\n".join(lines),
