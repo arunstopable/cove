@@ -33,15 +33,16 @@ def local_proxy() -> Generator[str, None, None]:
     )
     local_proxy_running = True
     try:
-        import requests
+        import urllib.request
+        import urllib.error
         
         # Wait up to 30 seconds for the proxy to initialize (Cloudflare bypass can be slow)
         start_time = time.time()
         ready = False
         while time.time() - start_time < 30:
             try:
-                resp = requests.get("http://127.0.0.1:8001/health", timeout=1)
-                if resp.status_code == 200:
+                resp = urllib.request.urlopen("http://127.0.0.1:8001/health", timeout=1)
+                if resp.getcode() == 200:
                     ready = True
                     break
             except Exception:
