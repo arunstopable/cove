@@ -14,6 +14,31 @@ download_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 active_downloads: dict[int, dict[str, Any]] = {}
 
 
+def cancel_downloads(title_id: int) -> int:
+    """Cancel any active or queued downloads for the given title_id."""
+    cancelled = 0
+
+    # 1. Remove from queue
+    old_qsize = download_queue.qsize()
+    new_queue = [item for item in download_queue._queue if item.get("title_id") != title_id]
+    cancelled += old_qsize - len(new_queue)
+    download_queue._queue.clear()
+    download_queue._queue.extend(new_queue)
+
+    # 2. Cancel active downloads
+    for worker_id, current in list(active_downloads.items()):
+        if current.get("title_id") == title_id:
+            proc = current.get("proc")
+            if proc and proc.returncode is None:
+                try:
+                    proc.kill()
+                    cancelled += 1
+                except Exception:
+                    pass
+
+    return cancelled
+
+
 async def download_worker(worker_id: int, get_stream_url_func) -> None:
     """Background task to process downloads."""
     while True:
@@ -80,6 +105,10 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
+            
+            # Store proc and title_id so cancel_downloads can kill it
+            active_downloads[worker_id]["proc"] = proc
+            active_downloads[worker_id]["title_id"] = title_id
 
             stderr_history = []
             while True:

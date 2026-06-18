@@ -362,7 +362,7 @@ def _queue_download(
         return False
 
 
-def cleanup_offline(sc_title: dict[str, Any]) -> None:
+def cleanup_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     is_tv = sc_title.get("type") == "tv"
     base_dir = config.NFS_SHOWS_PATH if is_tv else config.NFS_MOVIES_PATH
     name = safe_filename(sc_title.get("name", "Unknown"))
@@ -400,23 +400,54 @@ def cleanup_offline(sc_title: dict[str, Any]) -> None:
     mkv_files = glob.glob(search_path, recursive=True)
     if not mkv_files:
         ui.show_info("No downloaded .mkv files found here.")
-        return
-
+        
+    # Always ask if they want to clean up, because there might be ongoing downloads
+    # that haven't produced .mkv files yet, but have .part files in .wip
+    title_id = sc_title.get("id")
     confirm = questionary.confirm(
-        f"Delete {len(mkv_files)} physical .mkv file(s)? (.strm will be kept)",
+        f"Cancel ongoing downloads, clean WIP, and delete {len(mkv_files)} physical .mkv file(s)?",
         style=ui.cove_style,
         qmark="",
     ).ask()
 
-    if confirm:
-        deleted = 0
-        for f in mkv_files:
-            try:
-                os.remove(f)
-                deleted += 1
-            except Exception:
-                pass
-        ui.show_success(f"Deleted {deleted} file(s).")
+    if not confirm:
+        return
+
+    # Cancel ongoing downloads for this title
+    if title_id:
+        try:
+            url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/{title_id}"
+            r = httpx.delete(url, timeout=3.0)
+            if r.status_code == 200:
+                c = r.json().get("cancelled", 0)
+                if c > 0:
+                    ui.show_info(f"Cancelled {c} ongoing download(s) for this title.")
+        except Exception:
+            pass
+    deleted = 0
+    for f in mkv_files:
+        try:
+            os.remove(f)
+            deleted += 1
+        except Exception:
+            pass
+            
+    # Also clean up any lingering .part.mkv files in the WIP folder just in case
+    wip_dir = os.path.join(config.NFS_WIP_PATH, name)
+    wip_files = glob.glob(os.path.join(wip_dir, "**", "*.part.mkv"), recursive=True)
+    for f in wip_files:
+        try:
+            os.remove(f)
+            deleted += 1
+        except Exception:
+            pass
+
+    if deleted > 0:
+        ui.show_success(f"Deleted {deleted} physical file(s).")
+        
+    # Restore .strm files for the missing episodes
+    ui.show_info("Restoring .strm files...")
+    export_media(scraper, sc_title)
 
 
 def show_download_status() -> None:
@@ -804,7 +835,7 @@ def main() -> None:
                     download_offline(scraper, selected)
                     input("\nPress Enter to continue...")
                 elif action == "CLEANUP":
-                    cleanup_offline(selected)
+                    cleanup_offline(scraper, selected)
                     input("\nPress Enter to continue...")
                 elif action == "PLAY":
                     if selected.get("type") == "tv":

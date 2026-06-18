@@ -170,6 +170,13 @@ async def get_download_status() -> dict[str, Any]:
     }
 
 
+@app.delete("/api/downloads/{title_id}")
+async def stop_downloads(title_id: int) -> dict[str, Any]:
+    from proxy.downloader import cancel_downloads
+    cancelled = cancel_downloads(title_id)
+    return {"status": "ok", "cancelled": cancelled}
+
+
 @app.post("/api/downloads")
 async def queue_download(req: DownloadRequest) -> dict[str, str]:
     await download_queue.put(req.dict())
