@@ -633,10 +633,12 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             play_target = _strm_url(base_url, title_id, ep_id)
 
             try:
-                import requests, re
+                import urllib.request
+                import re
 
-                resp = requests.get(play_target, timeout=3)
-                res_match = re.search(r"RESOLUTION=\d+x(\d+)", resp.text)
+                resp = urllib.request.urlopen(play_target, timeout=3)
+                text = resp.read().decode('utf-8')
+                res_match = re.search(r"RESOLUTION=\d+x(\d+)", text)
                 if res_match:
                     ui.show_success(f"Stream quality locked at: {res_match.group(1)}p")
             except Exception:
