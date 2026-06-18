@@ -60,6 +60,9 @@ _scraper_lock = (
 _stream_cache: dict[tuple[int, int], tuple[str, datetime]] = {}
 _CACHE_TTL = timedelta(minutes=4)  # Vixcloud tokens expire after ~5 minutes
 
+# Global client for proxying segments (connection pooling)
+segment_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, http2=True)
+
 
 async def _get_stream_url(title_id: int, episode_id: Optional[int]) -> Optional[str]:
     """Fetch the real Vixcloud stream URL, using TTL cache."""
@@ -307,21 +310,14 @@ async def proxy_enc_key(key_url: str) -> Response:
 async def proxy_segment(url: str, request: Request) -> Response:
     """
     Proxy a video/audio .ts segment from the CDN.
-
-    The CDN (sc-u12-01.vix-content.net) blocks browser UAs (Chrome) and media
-    player UAs (Lavf/MPV) with 403. It also blocks HTTP/1.1 requests from httpx.
-    Using httpx default UA and HTTP/2 works.
-    We stream the response using StreamingResponse so the player doesn't timeout.
     """
-    client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, http2=True)
     try:
-        req = client.build_request("GET", url)
+        req = segment_client.build_request("GET", url)
         # We must use stream=True and not use "async with" to keep client open during streaming.
-        # BackgroundTask handles closing it.
-        resp = await client.send(req, stream=True)
+        # BackgroundTask handles closing the response stream so connection returns to pool.
+        resp = await segment_client.send(req, stream=True)
         if resp.status_code != 200:
             await resp.aclose()
-            await client.aclose()
             raise HTTPException(
                 status_code=resp.status_code, detail="Failed to fetch segment."
             )
@@ -332,9 +328,8 @@ async def proxy_segment(url: str, request: Request) -> Response:
             resp.aiter_raw(chunk_size=1048576),
             media_type="video/mp2t",
             headers=headers,
-            background=BackgroundTask(client.aclose),
+            background=BackgroundTask(resp.aclose),
         )
     except httpx.RequestError as exc:
-        await client.aclose()
         log.error(f"Error fetching segment: {exc}")
         raise HTTPException(status_code=502, detail="Error fetching segment.")
