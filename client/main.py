@@ -569,9 +569,18 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
             ep_num: int = episode.get("number", 0)
 
             if ep_num in downloaded_nums:
-                ep_name = safe_filename(episode.get("name", f"Episode {ep_num}"))
-                rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
-                play_target = os.path.join(config.NFS_SHOWS_PATH, rel_path)
+                target_dir = os.path.join(config.NFS_SHOWS_PATH, safe_filename(name), f"Season {season_num:02d}")
+                play_target = None
+                for f in os.listdir(target_dir):
+                    if f.endswith(".mkv") and f"S{season_num:02d}E{ep_num:02d}" in f:
+                        play_target = os.path.join(target_dir, f)
+                        break
+                        
+                if not play_target:
+                    ui.show_error("Physical file not found despite being marked as downloaded.")
+                    input("\nPress Enter to return...")
+                    continue
+
                 ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
 
                 import subprocess
@@ -637,11 +646,21 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     ep_id = extract_movie_ep_id(details)
 
     name = safe_filename(sc_title.get("name", "Unknown"))
-    rel_path = f"{name}/{name}.mkv"
-    phys_path = os.path.join(config.NFS_MOVIES_PATH, rel_path)
+    movie_dir = os.path.join(config.NFS_MOVIES_PATH, name)
 
-    if os.path.exists(phys_path):
-        play_target = phys_path
+    has_mkv = any(f.endswith(".mkv") for f in os.listdir(movie_dir)) if os.path.exists(movie_dir) else False
+
+    if has_mkv:
+        play_target = None
+        for f in os.listdir(movie_dir):
+            if f.endswith(".mkv"):
+                play_target = os.path.join(movie_dir, f)
+                break
+                
+        if not play_target:
+            ui.show_error("Physical file not found despite being marked as downloaded.")
+            return
+
         ui.show_info(f"Opening physical file ({config.PLAYER_APP})...")
 
         import subprocess
