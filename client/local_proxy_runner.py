@@ -33,11 +33,31 @@ def local_proxy() -> Generator[str, None, None]:
     )
     local_proxy_running = True
     try:
-        # Give it a second to boot
-        time.sleep(1)
-        yield "http://127.0.0.1:8001"
+        import requests
+        
+        # Wait up to 30 seconds for the proxy to initialize (Cloudflare bypass can be slow)
+        start_time = time.time()
+        ready = False
+        while time.time() - start_time < 30:
+            try:
+                resp = requests.get("http://127.0.0.1:8001/health", timeout=1)
+                if resp.status_code == 200:
+                    ready = True
+                    break
+            except Exception:
+                time.sleep(1)
+                
+        if not ready:
+            ui.show_error("Failed to start local proxy (timeout waiting for readiness).")
+            # We don't yield so the player won't open.
+        else:
+            yield "http://127.0.0.1:8001"
     finally:
         ui.show_info("Shutting down temporary local proxy...")
         proc.terminate()
-        proc.wait(timeout=3)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
         local_proxy_running = False

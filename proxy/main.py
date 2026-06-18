@@ -21,6 +21,8 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 
 from shared import config
@@ -249,26 +251,34 @@ async def proxy_enc_key(key_url: str) -> Response:
 
 
 @app.get("/segment")
-async def proxy_segment(url: str) -> Response:
+async def proxy_segment(url: str, request: Request) -> Response:
     """
     Proxy a video/audio .ts segment from the CDN.
 
     The CDN (sc-u12-01.vix-content.net) blocks browser UAs (Chrome) and media
-    player UAs (Lavf/MPV) with 403. Plain httpx with no custom UA works fine.
-    We deliberately do NOT set a User-Agent here so httpx uses its default.
+    player UAs (Lavf/MPV) with 403. It also blocks HTTP/1.1 requests from httpx.
+    Using httpx default UA and HTTP/2 works.
+    We stream the response using StreamingResponse so the player doesn't timeout.
     """
+    client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, http2=True)
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url)
+        req = client.build_request("GET", url)
+        # We must use stream=True and not use "async with" to keep client open during streaming.
+        # BackgroundTask handles closing it.
+        resp = await client.send(req, stream=True)
         if resp.status_code != 200:
+            await resp.aclose()
+            await client.aclose()
             raise HTTPException(
                 status_code=resp.status_code, detail="Failed to fetch segment."
             )
-        return Response(
-            content=resp.content,
+        return StreamingResponse(
+            resp.aiter_raw(),
             media_type="video/mp2t",
             headers={"Cache-Control": "no-cache"},
+            background=BackgroundTask(client.aclose),
         )
     except httpx.RequestError as exc:
+        await client.aclose()
         log.error(f"Error fetching segment: {exc}")
         raise HTTPException(status_code=502, detail="Error fetching segment.")
