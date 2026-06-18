@@ -34,7 +34,8 @@ async def download_worker(get_stream_url_func) -> None:
             out_path = os.path.join(base_path, rel_path)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-            part_path = out_path + ".part"
+            ext = os.path.splitext(out_path)[1]
+            part_path = out_path + ".part" + ext
             current_download["active"] = True
             current_download["relative_path"] = rel_path
             current_download["absolute_path"] = out_path
