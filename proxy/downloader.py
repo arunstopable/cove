@@ -39,6 +39,25 @@ def cancel_downloads(title_id: int) -> int:
     return cancelled
 
 
+def cleanup_empty_dirs(path: str, base_dir: str) -> None:
+    """Recursively remove empty directories up to base_dir."""
+    current = os.path.dirname(path)
+    # Ensure paths are absolute for reliable comparison
+    current_abs = os.path.abspath(current)
+    base_abs = os.path.abspath(base_dir)
+    
+    while current_abs and current_abs != base_abs and current_abs.startswith(base_abs):
+        try:
+            if not os.listdir(current_abs):
+                os.rmdir(current_abs)
+                log.info(f"[DOWNLOAD] Removed empty WIP dir: {current_abs}")
+                current_abs = os.path.dirname(current_abs)
+            else:
+                break
+        except Exception:
+            break
+
+
 async def download_worker(worker_id: int, get_stream_url_func) -> None:
     """Background task to process downloads."""
     while True:
@@ -177,3 +196,7 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
                     pass
             if worker_id in active_downloads:
                 del active_downloads[worker_id]
+                
+            # Clean up empty directories in WIP just in case
+            if 'part_path' in locals():
+                cleanup_empty_dirs(part_path, config.SERVER_WIP_PATH)
