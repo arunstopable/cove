@@ -56,28 +56,30 @@ _scraper_lock = (
     asyncio.Lock()
 )  # Serialises all scraper calls (sync client, not thread-safe)
 
-# TTL cache:  (title_id, episode_id) → (m3u8_url, cached_at)
-_stream_cache: dict[tuple[int, int], tuple[str, datetime]] = {}
+# TTL cache:  (title_id, episode_id) → (m3u8_url, is_fhd, cached_at)
+_stream_cache: dict[tuple[int, int], tuple[str, bool, datetime]] = {}
 _CACHE_TTL = timedelta(minutes=4)  # Vixcloud tokens expire after ~5 minutes
 
 # Global client for proxying segments (connection pooling)
 segment_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, http2=True)
 
 
-async def _get_stream_url(title_id: int, episode_id: Optional[int]) -> Optional[str]:
-    """Fetch the real Vixcloud stream URL, using TTL cache."""
+async def _get_stream_url(title_id: int, episode_id: Optional[int]) -> Optional[tuple[str, bool]]:
+    """Fetch the real Vixcloud stream URL and FHD status, using TTL cache."""
     now = datetime.now()
     if (title_id, episode_id) in _stream_cache:
-        url, cached_at = _stream_cache[(title_id, episode_id)]
+        url, is_fhd, cached_at = _stream_cache[(title_id, episode_id)]
         if now - cached_at < _CACHE_TTL:
-            return url
+            return url, is_fhd
 
     async with _scraper_lock:
         try:
-            master_url = await asyncio.to_thread(scraper.get_stream_url, title_id, episode_id)
-            if master_url:
-                _stream_cache[(title_id, episode_id)] = (master_url, now)
-            return master_url
+            result = await asyncio.to_thread(scraper.get_stream_url, title_id, episode_id)
+            if result:
+                url, is_fhd = result
+                _stream_cache[(title_id, episode_id)] = (url, is_fhd, now)
+                return url, is_fhd
+            return None
 
         except Exception as e:
             log.error(f"Error fetching stream URL: {e}")
@@ -216,11 +218,12 @@ async def proxy_master(
     2. Fetches master M3U8
     3. Rewrites it so child playlists pass through /proxy_child.m3u8
     """
-    m3u8_url = await _get_stream_url(title_id, episode_id)
-    if not m3u8_url:
+    result = await _get_stream_url(title_id, episode_id)
+    if not result:
         raise HTTPException(
             status_code=404, detail="Stream URL not found or extraction failed."
         )
+    m3u8_url, is_fhd = result
 
     try:
         # IMPORTANT: the token in m3u8_url is tied to the scraper's session cookies.
@@ -237,7 +240,7 @@ async def proxy_master(
 
         m3u8_text = resp.text
         proxy_base_url = f"{request.url.scheme}://{request.url.netloc}"
-        rewritten_m3u8 = rewrite_master_m3u8(m3u8_text, proxy_base_url, title_id)
+        rewritten_m3u8 = rewrite_master_m3u8(m3u8_text, proxy_base_url, title_id, is_fhd)
 
         return Response(
             content=rewritten_m3u8, media_type="application/vnd.apple.mpegurl"

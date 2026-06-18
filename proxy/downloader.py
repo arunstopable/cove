@@ -90,11 +90,12 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
             }
 
             log.info(f"[DOWNLOAD] Extracting URL for {title_id} / {episode_id}")
-            m3u8_url = await get_stream_url_func(title_id, episode_id)
-            if not m3u8_url:
+            result = await get_stream_url_func(title_id, episode_id)
+            if not result:
                 log.error(f"[DOWNLOAD] Failed to extract URL for {out_path}")
                 download_queue.task_done()
                 continue
+            m3u8_url, _ = result
 
             log.info(f"[DOWNLOAD] Starting ffmpeg to {part_path}")
 

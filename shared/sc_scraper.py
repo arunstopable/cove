@@ -392,7 +392,7 @@ class SCScraper:
         referer = f"/it/titles/{title_id}-{slug}"
         return self._inertia_get(url, referer_path=referer) or {}
 
-    def get_stream_url(self, title_id: int, episode_id: Optional[int] = None) -> Optional[str]:
+    def get_stream_url(self, title_id: int, episode_id: Optional[int] = None) -> Optional[tuple[str, bool]]:
         """
         Full pipeline to extract the master HLS M3U8 URL from Vixcloud.
 
@@ -462,13 +462,21 @@ class SCScraper:
                     )
                 return None
 
+            # Extract window.canPlayFHD
+            is_fhd = True
+            fhd_match = re.search(r"window\.canPlayFHD\s*=\s*(true|false)", vix_text, re.IGNORECASE)
+            if fhd_match:
+                is_fhd = fhd_match.group(1).lower() == "true"
+
             # ── Step 3: assemble M3U8 URL ────────────────────────────────
-            master_m3u8 = f"{playlist_url}?token={token}&expires={expires}&h=1"
+            master_m3u8 = f"{playlist_url}?token={token}&expires={expires}"
+            if is_fhd:
+                master_m3u8 += "&h=1"
 
             if config.DEBUG:
                 print(f"[stream] OK → {master_m3u8[:80]}…")
 
-            return master_m3u8
+            return master_m3u8, is_fhd
 
         except Exception as exc:
             if config.DEBUG:

@@ -6,13 +6,14 @@ import re
 import urllib.parse
 
 
-def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) -> str:
+def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int, is_fhd: bool = True) -> str:
     """
     Parses the master playlist and rewrites child stream URLs (video, audio, sub)
     to point back to this proxy server using relative paths.
 
     Also filters out lower resolution streams, keeping ONLY the highest available
     resolution (e.g., 1080p if available, otherwise 720p).
+    If is_fhd is False, it caps the maximum resolution at 720p to avoid 403 Forbidden.
     """
     lines = original_m3u8.splitlines()
     rewritten_lines = []
@@ -33,6 +34,8 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
             res_match = re.search(r"RESOLUTION=\d+x(\d+)", stream_blocks[-1][0])
             if res_match:
                 height = int(res_match.group(1))
+                if not is_fhd and height > 720:
+                    continue
                 if height > max_height:
                     max_height = height
         else:
