@@ -427,6 +427,11 @@ def show_download_status() -> None:
 
                 lines.append("")
                 lines.append(f"Queue Size: {queue_size}")
+                
+                queue_items = data.get("queue_items", [])
+                if queue_items:
+                    for idx, item in enumerate(queue_items, 1):
+                        lines.append(f"  {idx}. [dim]{item}[/]")
 
                 return Panel(
                     "\n".join(lines),

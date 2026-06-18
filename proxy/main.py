@@ -138,9 +138,15 @@ async def health_check() -> dict[str, Any]:
 
 @app.get("/api/downloads/status")
 async def get_download_status() -> dict[str, Any]:
+    # Extract the relative_path from items currently in the queue
+    items = []
+    for item in list(download_queue._queue):
+        items.append(item.get("relative_path", "Unknown"))
+
     return {
         "active_download": current_download if current_download["active"] else None,
         "queue_size": download_queue.qsize(),
+        "queue_items": items,
     }
 
 
