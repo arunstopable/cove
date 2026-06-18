@@ -21,9 +21,14 @@ def safe_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
 
-def _strm_url(base_url: str, title_id: int, episode_id: int) -> str:
+from typing import Optional
+
+def _strm_url(base_url: str, title_id: int, episode_id: Optional[int] = None) -> str:
     """Build the .strm content URL pointing to the active proxy /play.m3u8 endpoint."""
-    return f"{base_url}/play.m3u8?title_id={title_id}&episode_id={episode_id}"
+    url = f"{base_url}/play.m3u8?title_id={title_id}"
+    if episode_id is not None:
+        url += f"&episode_id={episode_id}"
+    return url
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -594,10 +599,9 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         fallback = (details.get("loadedSeason") or {}).get("episodes", [])
         if fallback:
             ep_id = fallback[0].get("id")
-
-    if not ep_id:
-        ui.show_error("Could not find playback ID.")
-        return
+            
+    # For movies, ep_id is often None because there are no episodes.
+    # We proceed anyway, passing None to the proxy.
 
     name = safe_filename(sc_title.get("name", "Unknown"))
     rel_path = f"{name}/{name}.mkv"
