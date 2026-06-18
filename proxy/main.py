@@ -154,6 +154,8 @@ async def get_download_status() -> dict[str, Any]:
     active_list = []
     for current in active_downloads.values():
         item = dict(current)
+        if "proc" in item:
+            del item["proc"]
         part_path = item.get("part_path")
         downloaded_mb = 0.0
         if part_path and os.path.exists(part_path):
