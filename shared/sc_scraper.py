@@ -403,6 +403,9 @@ class SCScraper:
              → extract token, expires, playlist URL from page JS
           3. Build and return master M3U8 URL
         """
+        import logging
+        log = logging.getLogger("cove.scraper")
+        self._ensure_session()
         try:
             # ── Step 1: iframe page → embed URL ─────────────────────────
             if episode_id:
@@ -426,9 +429,7 @@ class SCScraper:
             )
             if not embed_match:
                 if config.DEBUG:
-                    print(
-                        f"[stream] Embed URL not found (title={title_id}, ep={episode_id})"
-                    )
+                    log.error(f"[stream] Embed URL not found (title={title_id}, ep={episode_id})")
                 return None
 
             embed_url = htmlmod.unescape(embed_match.group(1))
@@ -456,7 +457,7 @@ class SCScraper:
 
             if not (token and expires and playlist_url):
                 if config.DEBUG:
-                    print(
+                    log.error(
                         f"[stream] Missing fields — "
                         f"token:{bool(token)} expires:{bool(expires)} playlist:{bool(playlist_url)}"
                     )
@@ -474,13 +475,12 @@ class SCScraper:
                 master_m3u8 += "&h=1"
 
             if config.DEBUG:
-                print(f"[stream] OK → {master_m3u8[:80]}…")
+                log.info(f"[stream] OK → {master_m3u8[:80]}…")
 
             return master_m3u8, is_fhd
 
         except Exception as exc:
-            if config.DEBUG:
-                print(f"[stream] Extraction error: {exc}")
+            log.exception(f"[stream] Extraction error for title={title_id} ep={episode_id}")
             return None
 
     def close(self) -> None:
