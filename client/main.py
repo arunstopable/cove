@@ -15,6 +15,18 @@ from shared.sc_scraper import SCScraper
 
 from client.local_proxy_runner import local_proxy
 
+def extract_movie_ep_id(details: dict[str, Any]) -> Optional[int]:
+    """Extract playback episode ID from movie details. Returns None if it has no episodes."""
+    ep_id: Optional[int] = None
+    episodes_direct = details.get("title", {}).get("episodes", [])
+    if episodes_direct:
+        ep_id = episodes_direct[0].get("id")
+    if not ep_id:
+        fallback = (details.get("loadedSeason") or {}).get("episodes", [])
+        if fallback:
+            ep_id = fallback[0].get("id")
+    return ep_id
+
 
 def safe_filename(name: str) -> str:
     """Make string safe for macOS/Linux file paths."""
@@ -301,18 +313,7 @@ def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         with ui.spinner("Fetching details..."):
             details = scraper.get_title_details(title_id, slug)
 
-        ep_id: Optional[int] = None
-        episodes_direct = details.get("title", {}).get("episodes", [])
-        if episodes_direct:
-            ep_id = episodes_direct[0].get("id")
-        if not ep_id:
-            fallback = details.get("loadedSeason", {}).get("episodes", [])
-            if fallback:
-                ep_id = fallback[0].get("id")
-
-        if not ep_id:
-            ui.show_error("Could not find playback ID.")
-            return
+        ep_id = extract_movie_ep_id(details)
 
         rel_path = f"{name}/{name}.mkv"
         if _queue_download(title_id, ep_id, "movie", rel_path):
@@ -591,17 +592,7 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     with ui.spinner("Fetching metadata..."):
         details = scraper.get_title_details(title_id, slug)
 
-    ep_id: Optional[int] = None
-    episodes_direct = details.get("title", {}).get("episodes", [])
-    if episodes_direct:
-        ep_id = episodes_direct[0].get("id")
-    if not ep_id:
-        fallback = (details.get("loadedSeason") or {}).get("episodes", [])
-        if fallback:
-            ep_id = fallback[0].get("id")
-            
-    # For movies, ep_id is often None because there are no episodes.
-    # We proceed anyway, passing None to the proxy.
+    ep_id = extract_movie_ep_id(details)
 
     name = safe_filename(sc_title.get("name", "Unknown"))
     rel_path = f"{name}/{name}.mkv"

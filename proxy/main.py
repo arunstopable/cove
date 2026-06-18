@@ -116,7 +116,7 @@ app.add_middleware(
 
 class DownloadRequest(BaseModel):
     title_id: int
-    episode_id: int
+    episode_id: Optional[int] = None
     type: str  # "tv" or "movie"
     relative_path: str
 
@@ -156,9 +156,13 @@ async def queue_download(req: DownloadRequest) -> dict[str, str]:
 
 
 @app.get("/play.m3u8")
-async def play_m3u8(title_id: int, episode_id: int, request: Request) -> Response:
+async def proxy_master(
+    title_id: int, request: Request, episode_id: Optional[int] = None
+) -> Response:
     """
-    Returns the rewritten Master M3U8.
+    1. Extracts stream URL from vixcloud
+    2. Fetches master M3U8
+    3. Rewrites it so child playlists pass through /proxy_child.m3u8
     """
     m3u8_url = await _get_stream_url(title_id, episode_id)
     if not m3u8_url:

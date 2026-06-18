@@ -147,8 +147,72 @@ class SCScraper:
 
         return self.active_domain
 
+    def get_session_file(self) -> str:
+        """Return the path to the session cache file."""
+        import os
+        path = os.path.expanduser("~/.cove/session.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
+
+    def load_session(self) -> bool:
+        """Attempt to load a valid session from disk."""
+        import json, os, time
+        path = self.get_session_file()
+        if not os.path.exists(path):
+            return False
+            
+        try:
+            with open(path, "r") as f:
+                state = json.load(f)
+                
+            # Discard if older than 2 hours (Cloudflare sessions usually last a bit)
+            if time.time() - state.get("timestamp", 0) > 7200:
+                return False
+                
+            self.active_domain = state["domain"]
+            self.xsrf_token = state["xsrf"]
+            self.inertia_version = state["inertia"]
+            self.client.cookies.update(state["cookies"])
+            self._last_init = datetime.fromtimestamp(state["timestamp"])
+            
+            # Verify session still works by making a lightweight request
+            try:
+                resp = self.client.get(f"{self.active_domain}/", timeout=5.0)
+                if resp.status_code == 200:
+                    self._session_valid = True
+                    if config.DEBUG:
+                        print(f"[domain] Restored session for {self.active_domain}")
+                    return True
+            except Exception:
+                pass
+        except Exception as e:
+            if config.DEBUG:
+                print(f"[domain] Failed to load session: {e}")
+                
+        return False
+
+    def save_session(self) -> None:
+        """Save the current session to disk."""
+        import json, time
+        try:
+            state = {
+                "timestamp": time.time(),
+                "domain": self.active_domain,
+                "xsrf": self.xsrf_token,
+                "inertia": self.inertia_version,
+                "cookies": dict(self.client.cookies)
+            }
+            with open(self.get_session_file(), "w") as f:
+                json.dump(state, f)
+        except Exception as e:
+            if config.DEBUG:
+                print(f"[domain] Failed to save session: {e}")
+
     def init_session(self) -> None:
         """Resolve domain and fetch XSRF token + Inertia version."""
+        if self.load_session():
+            return
+            
         self.resolve_domain()
 
         try:
@@ -189,6 +253,8 @@ class SCScraper:
                     f"Inertia: {self.inertia_version or '✗'}  "
                     f"Valid: {self._session_valid}"
                 )
+
+            self.save_session()
 
         except Exception as exc:
             self._session_valid = False
@@ -326,7 +392,7 @@ class SCScraper:
         referer = f"/it/titles/{title_id}-{slug}"
         return self._inertia_get(url, referer_path=referer) or {}
 
-    def get_stream_url(self, title_id: int, episode_id: int) -> Optional[str]:
+    def get_stream_url(self, title_id: int, episode_id: Optional[int] = None) -> Optional[str]:
         """
         Full pipeline to extract the master HLS M3U8 URL from Vixcloud.
 
@@ -339,11 +405,15 @@ class SCScraper:
         """
         try:
             # ── Step 1: iframe page → embed URL ─────────────────────────
-            iframe_url = (
-                f"{self.active_domain}/it/iframe/{title_id}"
-                f"?episode_id={episode_id}&next_episode=1"
-            )
-            watch_referer = f"{self.active_domain}/it/watch/{title_id}?e={episode_id}"
+            if episode_id:
+                iframe_url = (
+                    f"{self.active_domain}/it/iframe/{title_id}"
+                    f"?episode_id={episode_id}&next_episode=1"
+                )
+                watch_referer = f"{self.active_domain}/it/watch/{title_id}?e={episode_id}"
+            else:
+                iframe_url = f"{self.active_domain}/it/iframe/{title_id}"
+                watch_referer = f"{self.active_domain}/it/watch/{title_id}"
 
             iframe_resp = self._get(
                 iframe_url,

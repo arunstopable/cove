@@ -49,7 +49,9 @@ async def download_worker(get_stream_url_func) -> None:
             log.info(f"[DOWNLOAD] Starting ffmpeg to {part_path}")
 
             # Use the local proxy so ffmpeg benefits from the quality filtering
-            proxy_url = f"http://127.0.0.1:8000/play.m3u8?title_id={title_id}&episode_id={episode_id}"
+            proxy_url = f"http://127.0.0.1:8000/play.m3u8?title_id={title_id}"
+            if episode_id is not None:
+                proxy_url += f"&episode_id={episode_id}"
 
             cmd = [
                 "ffmpeg",
