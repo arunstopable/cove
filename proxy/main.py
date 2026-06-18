@@ -28,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from shared import config
 from shared.sc_scraper import SCScraper
 from proxy.m3u8_rewriter import rewrite_master_m3u8, rewrite_child_m3u8
-from proxy.downloader import download_worker, download_queue, current_download
+from proxy.downloader import download_worker, download_queue, active_downloads
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -91,11 +91,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.to_thread(scraper.init_session)
     log.info(f"Active domain: {scraper.active_domain}")
 
-    worker_task = asyncio.create_task(download_worker(_get_stream_url))
+    worker_tasks = [
+        asyncio.create_task(download_worker(i, _get_stream_url))
+        for i in range(config.MAX_CONCURRENT_DOWNLOADS)
+    ]
 
     yield
 
-    worker_task.cancel()
+    for task in worker_tasks:
+        task.cancel()
     log.info("Shutting down Cove Proxy...")
 
 
@@ -144,7 +148,7 @@ async def get_download_status() -> dict[str, Any]:
         items.append(item.get("relative_path", "Unknown"))
 
     return {
-        "active_download": current_download if current_download["active"] else None,
+        "active_downloads": list(active_downloads.values()),
         "queue_size": download_queue.qsize(),
         "queue_items": items,
     }

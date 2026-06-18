@@ -34,6 +34,8 @@ SERVER_SHOWS_PATH: str = os.environ.get("SERVER_SHOWS_PATH", "/shows")
 SERVER_MOVIES_PATH: str = os.environ.get("SERVER_MOVIES_PATH", "/movies")
 SERVER_WIP_PATH: str = os.environ.get("SERVER_WIP_PATH", "/wip")
 
+MAX_CONCURRENT_DOWNLOADS: int = int(os.environ.get("MAX_CONCURRENT_DOWNLOADS", "3"))
+
 # ---------------------------------------------------------------------------
 # Local player (macOS app name or CLI binary)
 # Supported values: IINA, VLC, mpv

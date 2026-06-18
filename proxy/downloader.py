@@ -10,15 +10,11 @@ log = logging.getLogger("cove.proxy.downloader")
 
 # Download Queue and Status
 download_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-current_download: dict[str, Any] = {
-    "active": False,
-    "relative_path": "",
-    "absolute_path": "",
-}
+active_downloads: dict[int, dict[str, Any]] = {}
 
 
-async def download_worker(get_stream_url_func) -> None:
-    """Background task to process downloads sequentially."""
+async def download_worker(worker_id: int, get_stream_url_func) -> None:
+    """Background task to process downloads."""
     while True:
         try:
             task = await download_queue.get()
@@ -40,9 +36,11 @@ async def download_worker(get_stream_url_func) -> None:
 
             ext = os.path.splitext(out_path)[1]
             part_path = wip_path + ".part" + ext
-            current_download["active"] = True
-            current_download["relative_path"] = rel_path
-            current_download["absolute_path"] = out_path
+            active_downloads[worker_id] = {
+                "active": True,
+                "relative_path": rel_path,
+                "absolute_path": out_path,
+            }
 
             log.info(f"[DOWNLOAD] Extracting URL for {title_id} / {episode_id}")
             m3u8_url = await get_stream_url_func(title_id, episode_id)
@@ -106,8 +104,7 @@ async def download_worker(get_stream_url_func) -> None:
         except Exception as e:
             log.exception(f"[DOWNLOAD] Worker error: {e}")
         finally:
-            current_download["active"] = False
-            current_download["relative_path"] = ""
-            current_download["absolute_path"] = ""
+            if worker_id in active_downloads:
+                del active_downloads[worker_id]
             # We must mark the task as done, but only if we haven't already.
             pass
