@@ -254,7 +254,7 @@ async def proxy_enc_key(key_url: str) -> Response:
         raise HTTPException(status_code=502, detail="Error fetching encryption key.")
 
 
-@app.get("/segment")
+@app.get("/segment.ts")
 async def proxy_segment(url: str, request: Request) -> Response:
     """
     Proxy a video/audio .ts segment from the CDN.

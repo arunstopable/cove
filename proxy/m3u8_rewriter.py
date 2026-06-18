@@ -9,7 +9,7 @@ import urllib.parse
 def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) -> str:
     """
     Parses the master playlist and rewrites child stream URLs (video, audio, sub)
-    to point back to this proxy server.
+    to point back to this proxy server using relative paths.
 
     Also filters out lower resolution streams, keeping ONLY the highest available
     resolution (e.g., 1080p if available, otherwise 720p).
@@ -46,14 +46,14 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
                 info_line, url_line = block
                 rewritten_lines.append(info_line)
                 enc_url = urllib.parse.quote(url_line, safe="")
-                proxy_url = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
+                proxy_url = f"proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
                 rewritten_lines.append(proxy_url)
     else:
         for block in stream_blocks:
             info_line, url_line = block
             rewritten_lines.append(info_line)
             enc_url = urllib.parse.quote(url_line, safe="")
-            proxy_url = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
+            proxy_url = f"proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
             rewritten_lines.append(proxy_url)
 
     # Rewrite Audio / Subtitle media definitions
@@ -64,7 +64,7 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
             if uri_match:
                 orig_uri = uri_match.group(1)
                 enc_uri = urllib.parse.quote(orig_uri, safe="")
-                new_uri = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_uri}"
+                new_uri = f"proxy_child.m3u8?title_id={title_id}&child_url={enc_uri}"
                 line = line.replace(f'URI="{orig_uri}"', f'URI="{new_uri}"')
         final_lines.append(line)
 
@@ -75,9 +75,8 @@ def rewrite_child_m3u8(original_m3u8: str, child_url: str, proxy_base_url: str) 
     """
     Parses a child playlist (video, audio, or subtitle).
     - Resolves relative TS segment paths to absolute URLs.
-    - Intercepts EXT-X-KEY to proxy the AES-128 encryption key.
-    - Routes .ts segments through /segment proxy (CDN blocks browser/player UAs
-      but allows plain httpx/curl — so we must proxy them).
+    - Intercepts EXT-X-KEY to proxy the AES-128 encryption key using relative paths.
+    - Routes .ts segments through /segment.ts proxy using relative paths.
     """
     # child_url looks like: https://vixcloud.co/playlist/.../chunk.m3u8?...
     base_url = child_url.split("?")[0].rsplit("/", 1)[0] + "/"
@@ -92,7 +91,7 @@ def rewrite_child_m3u8(original_m3u8: str, child_url: str, proxy_base_url: str) 
             if uri_match:
                 orig_key_uri = uri_match.group(1)
                 enc_key_uri = urllib.parse.quote(orig_key_uri, safe="")
-                new_key_uri = f"{proxy_base_url}/enc.key?key_url={enc_key_uri}"
+                new_key_uri = f"enc.key?key_url={enc_key_uri}"
                 line = line.replace(f'URI="{orig_key_uri}"', f'URI="{new_key_uri}"')
             rewritten_lines.append(line)
 
@@ -104,7 +103,7 @@ def rewrite_child_m3u8(original_m3u8: str, child_url: str, proxy_base_url: str) 
                 line = urllib.parse.urljoin(base_url, line)
             # Route through proxy segment endpoint so CDN sees neutral UA
             enc_seg = urllib.parse.quote(line, safe="")
-            line = f"{proxy_base_url}/segment?url={enc_seg}"
+            line = f"segment.ts?url={enc_seg}"
             rewritten_lines.append(line)
 
     return "\n".join(rewritten_lines) + "\n"
