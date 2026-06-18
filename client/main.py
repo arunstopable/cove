@@ -585,11 +585,10 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                 import subprocess
 
                 if config.PLAYER_APP.lower() == "iina":
-                    # We use iina-cli directly without --keep-running so it returns immediately.
-                    # We CANNOT use 'open -a' because macOS LaunchServices normalizes NFC paths to NFD,
-                    # which breaks on TrueNAS ZFS NFS mounts.
+                    # Use --keep-running so it waits for the video to finish before returning to the menu
                     cmd = [
                         "/Applications/IINA.app/Contents/MacOS/iina-cli",
+                        "--keep-running",
                         play_target,
                     ]
                 elif config.PLAYER_APP.lower() == "vlc":
@@ -677,6 +676,7 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         if config.PLAYER_APP.lower() == "iina":
             cmd = [
                 "/Applications/IINA.app/Contents/MacOS/iina-cli",
+                "--keep-running",
                 play_target,
             ]
         elif config.PLAYER_APP.lower() == "vlc":
