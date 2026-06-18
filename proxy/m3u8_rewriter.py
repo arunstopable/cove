@@ -44,6 +44,7 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
             res_match = re.search(r"RESOLUTION=\d+x(\d+)", block[0])
             if res_match and int(res_match.group(1)) == max_height:
                 info_line, url_line = block
+                info_line = re.sub(r',?SUBTITLES="[^"]+"', '', info_line)
                 rewritten_lines.append(info_line)
                 enc_url = urllib.parse.quote(url_line, safe="")
                 proxy_url = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
@@ -51,6 +52,7 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
     else:
         for block in stream_blocks:
             info_line, url_line = block
+            info_line = re.sub(r',?SUBTITLES="[^"]+"', '', info_line)
             rewritten_lines.append(info_line)
             enc_url = urllib.parse.quote(url_line, safe="")
             proxy_url = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
