@@ -32,6 +32,7 @@ NFS_MOVIES_PATH: str = os.environ.get("NFS_MOVIES_PATH", "/Volumes/Logan/movies"
 # ── Server container paths (used by Proxy to save downloads) ──────────────────
 SERVER_SHOWS_PATH: str = os.environ.get("SERVER_SHOWS_PATH", "/shows")
 SERVER_MOVIES_PATH: str = os.environ.get("SERVER_MOVIES_PATH", "/movies")
+SERVER_WIP_PATH: str = os.environ.get("SERVER_WIP_PATH", "/wip")
 
 # ---------------------------------------------------------------------------
 # Local player (macOS app name or CLI binary)

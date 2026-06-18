@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import shutil
 
 from typing import Any
 from shared import config
@@ -34,8 +35,11 @@ async def download_worker(get_stream_url_func) -> None:
             out_path = os.path.join(base_path, rel_path)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
+            wip_path = os.path.join(config.SERVER_WIP_PATH, rel_path)
+            os.makedirs(os.path.dirname(wip_path), exist_ok=True)
+
             ext = os.path.splitext(out_path)[1]
-            part_path = out_path + ".part" + ext
+            part_path = wip_path + ".part" + ext
             current_download["active"] = True
             current_download["relative_path"] = rel_path
             current_download["absolute_path"] = out_path
@@ -79,7 +83,17 @@ async def download_worker(get_stream_url_func) -> None:
             _, stderr_data = await proc.communicate()
 
             if proc.returncode == 0 and os.path.exists(part_path):
-                os.rename(part_path, out_path)
+                shutil.move(part_path, out_path)
+                
+                # Delete corresponding .strm file if it exists
+                strm_path = os.path.splitext(out_path)[0] + ".strm"
+                if os.path.exists(strm_path):
+                    try:
+                        os.remove(strm_path)
+                        log.info(f"[DOWNLOAD] Deleted old .strm file: {strm_path}")
+                    except OSError as e:
+                        log.warning(f"[DOWNLOAD] Could not delete .strm file {strm_path}: {e}")
+
                 log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
             else:
                 err_msg = stderr_data.decode('utf-8', errors='replace') if stderr_data else "No stderr"
