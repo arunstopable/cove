@@ -147,8 +147,18 @@ async def get_download_status() -> dict[str, Any]:
     for item in list(download_queue._queue):
         items.append(item.get("relative_path", "Unknown"))
 
+    active_list = []
+    for current in active_downloads.values():
+        item = dict(current)
+        part_path = item.get("part_path")
+        downloaded_mb = 0.0
+        if part_path and os.path.exists(part_path):
+            downloaded_mb = round(os.path.getsize(part_path) / (1024 * 1024), 2)
+        item["downloaded_mb"] = downloaded_mb
+        active_list.append(item)
+
     return {
-        "active_downloads": list(active_downloads.values()),
+        "active_downloads": active_list,
         "queue_size": download_queue.qsize(),
         "queue_items": items,
     }

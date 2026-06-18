@@ -421,7 +421,8 @@ def show_download_status() -> None:
                     lines.append(f"[bold {ui.APPLE_BLUE}]Active Downloads:[/]")
                     for current in active_downloads:
                         lines.append(f"  {current.get('relative_path', 'Unknown')}")
-                        lines.append("  [dim]Status:[/] Downloading (ffmpeg running...)")
+                        mb = current.get('downloaded_mb', 0)
+                        lines.append(f"  [dim]Status:[/] Downloading (ffmpeg running...) - {mb} MB")
                         lines.append("")
                 else:
                     lines.append("[dim]No active downloads.[/]")
