@@ -205,10 +205,6 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
         ep_id = extract_movie_ep_id(details)
 
-        if not ep_id:
-            ui.show_error(f"Could not find playback ID for {name}.")
-            return
-
         movie_dir = os.path.join(base_dir, name)
         os.makedirs(movie_dir, exist_ok=True)
         file_path_strm = os.path.join(movie_dir, f"{name}.strm")
@@ -335,7 +331,7 @@ def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
 
 def _queue_download(
-    title_id: int, episode_id: int, media_type: str, relative_path: str
+    title_id: int, episode_id: Optional[int], media_type: str, relative_path: str
 ) -> bool:
     url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads"
     payload = {

@@ -61,7 +61,7 @@ _stream_cache: dict[tuple[int, int], tuple[str, datetime]] = {}
 _CACHE_TTL = timedelta(minutes=4)  # Vixcloud tokens expire after ~5 minutes
 
 
-async def _get_stream_url(title_id: int, episode_id: int) -> Optional[str]:
+async def _get_stream_url(title_id: int, episode_id: Optional[int]) -> Optional[str]:
     """Fetch the real Vixcloud stream URL, using TTL cache."""
     now = datetime.now()
     if (title_id, episode_id) in _stream_cache:
@@ -122,7 +122,7 @@ app.add_middleware(
 class DownloadRequest(BaseModel):
     title_id: int
     episode_id: Optional[int] = None
-    type: str  # "tv" or "movie"
+    type: str  # "tv" | "movie"
     relative_path: str
 
 
