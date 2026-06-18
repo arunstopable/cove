@@ -413,10 +413,12 @@ def cleanup_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     if not confirm:
         return
 
-    # Cancel ongoing downloads for this title
+    # Cancel ongoing downloads for this title and let proxy wipe the .wip folder
     if title_id:
         try:
-            url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/{title_id}"
+            import urllib.parse
+            encoded_name = urllib.parse.quote(name)
+            url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads/{title_id}?name={encoded_name}"
             r = httpx.delete(url, timeout=3.0)
             if r.status_code == 200:
                 c = r.json().get("cancelled", 0)
@@ -424,18 +426,9 @@ def cleanup_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                     ui.show_info(f"Cancelled {c} ongoing download(s) for this title.")
         except Exception:
             pass
+            
     deleted = 0
     for f in mkv_files:
-        try:
-            os.remove(f)
-            deleted += 1
-        except Exception:
-            pass
-            
-    # Also clean up any lingering .part.mkv files in the WIP folder just in case
-    wip_dir = os.path.join(config.NFS_WIP_PATH, name)
-    wip_files = glob.glob(os.path.join(wip_dir, "**", "*.part.mkv"), recursive=True)
-    for f in wip_files:
         try:
             os.remove(f)
             deleted += 1

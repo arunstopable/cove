@@ -173,10 +173,24 @@ async def get_download_status() -> dict[str, Any]:
 
 
 @app.delete("/api/downloads/{title_id}")
-async def stop_downloads(title_id: int) -> dict[str, Any]:
+async def stop_downloads(title_id: int, name: str = None) -> dict[str, Any]:
     from proxy.downloader import cancel_downloads
     cancelled = cancel_downloads(title_id)
-    return {"status": "ok", "cancelled": cancelled}
+    
+    deleted_wip = False
+    if name:
+        # The proxy runs as root in docker, so it has permission to delete the WIP folder.
+        # The client over NFS might not have permission.
+        wip_dir = os.path.join(config.SERVER_WIP_PATH, name)
+        if os.path.exists(wip_dir):
+            try:
+                import shutil
+                shutil.rmtree(wip_dir)
+                deleted_wip = True
+            except Exception as e:
+                log.error(f"Failed to delete WIP folder {wip_dir}: {e}")
+
+    return {"status": "ok", "cancelled": cancelled, "deleted_wip": deleted_wip}
 
 
 @app.post("/api/downloads")
