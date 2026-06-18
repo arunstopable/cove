@@ -81,11 +81,22 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
 
             stderr_history = []
             while True:
-                line = await proc.stderr.readline()
+                try:
+                    # ffmpeg uses \r for progress updates, not \n
+                    line = await proc.stderr.readuntil(b'\r')
+                except asyncio.exceptions.IncompleteReadError as e:
+                    line = e.partial
+                except asyncio.exceptions.LimitOverrunError:
+                    # If it somehow exceeds limit, just read chunk
+                    line = await proc.stderr.read(4096)
+
                 if not line:
                     break
                 
-                line_str = line.decode('utf-8', errors='replace')
+                line_str = line.decode('utf-8', errors='replace').strip()
+                if not line_str:
+                    continue
+
                 stderr_history.append(line_str)
                 if len(stderr_history) > 50:
                     stderr_history.pop(0)
@@ -120,12 +131,18 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
                     err_msg = "... [TRUNCATED] ...\n" + err_msg[-2000:]
                 log.error(f"[DOWNLOAD] ✗ Failed (code={proc.returncode}): {out_path}\nFFmpeg error:\n{err_msg}")
                 if os.path.exists(part_path):
-                    os.remove(part_path)
+                    try:
+                        os.remove(part_path)
+                    except OSError:
+                        pass
 
         except Exception as e:
             log.exception(f"[DOWNLOAD] Worker error: {e}")
         finally:
+            if 'proc' in locals() and proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
             if worker_id in active_downloads:
                 del active_downloads[worker_id]
-            # We must mark the task as done, but only if we haven't already.
-            pass
