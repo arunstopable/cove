@@ -60,6 +60,10 @@ async def download_worker(get_stream_url_func) -> None:
                 config.USER_AGENT,
                 "-i",
                 proxy_url,
+                "-map", "0:v?",
+                "-map", "0:a?",
+                "-map", "0:s?",
+                "-dn",  # Ignore data streams (like ID3 tags) which crash the MKV muxer
                 "-c",
                 "copy",
                 part_path,
@@ -68,16 +72,17 @@ async def download_worker(get_stream_url_func) -> None:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
 
-            await proc.wait()
+            _, stderr_data = await proc.communicate()
 
             if proc.returncode == 0 and os.path.exists(part_path):
                 os.rename(part_path, out_path)
                 log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
             else:
-                log.error(f"[DOWNLOAD] ✗ Failed (code={proc.returncode}): {out_path}")
+                err_msg = stderr_data.decode('utf-8', errors='replace') if stderr_data else "No stderr"
+                log.error(f"[DOWNLOAD] ✗ Failed (code={proc.returncode}): {out_path}\nFFmpeg error:\n{err_msg}")
                 if os.path.exists(part_path):
                     os.remove(part_path)
 
