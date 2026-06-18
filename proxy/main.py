@@ -13,6 +13,7 @@ GET /enc.key             Proxies AES-128 encryption keys from Vixcloud.
 
 import asyncio
 import logging
+import os
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
