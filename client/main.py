@@ -414,15 +414,14 @@ def show_download_status() -> None:
             if r.status_code == 200:
                 data = r.json()
                 queue_size = data.get("queue_size", 0)
-                current = data.get("current", {})
+                current = data.get("active_download") or {}
 
                 lines = []
                 if current.get("active"):
                     lines.append(f"[bold {ui.APPLE_BLUE}]Active Download:[/]")
                     lines.append(f"  {current.get('relative_path', 'Unknown')}")
-                    lines.append(
-                        f"  [dim]Progress:[/] {current.get('downloaded_mb', 0)} MB"
-                    )
+                    # Note: proxy doesn't track downloaded_mb yet, so we just show active status
+                    lines.append("  [dim]Status:[/] Downloading (ffmpeg running...)")
                 else:
                     lines.append("[dim]No active downloads.[/]")
 
