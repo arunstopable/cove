@@ -49,9 +49,9 @@ class SCScraper:
     ]
 
     _PLAYLIST_PATTERNS: list[str] = [
-        r"url:\s*'(https://vixcloud\.co/playlist/\d+)'",
-        r'url:\s*"(https://vixcloud\.co/playlist/\d+)"',
-        r'"url"\s*:\s*"(https://vixcloud\.co/playlist/\d+)"',
+        r"url:\s*'(https://vixcloud\.co/playlist/[^']+)'",
+        r'url:\s*"(https://vixcloud\.co/playlist/[^"]+)"',
+        r'"url"\s*:\s*"(https://vixcloud\.co/playlist/[^"]+)"',
     ]
 
     MAX_RETRIES: int = 3
@@ -428,8 +428,7 @@ class SCScraper:
                 iframe_resp.text,
             )
             if not embed_match:
-                if config.DEBUG:
-                    log.error(f"[stream] Embed URL not found (title={title_id}, ep={episode_id})")
+                log.error(f"[stream] Embed URL not found (title={title_id}, ep={episode_id})")
                 return None
 
             embed_url = htmlmod.unescape(embed_match.group(1))
@@ -443,6 +442,8 @@ class SCScraper:
                 },
             )
             vix_text = vix_resp.text
+            with open("vix_dump.html", "w") as f:
+                f.write(vix_text)
 
             def _first_match(patterns: list[str], text: str) -> Optional[str]:
                 for pat in patterns:
@@ -456,11 +457,10 @@ class SCScraper:
             playlist_url = _first_match(self._PLAYLIST_PATTERNS, vix_text)
 
             if not (token and expires and playlist_url):
-                if config.DEBUG:
-                    log.error(
-                        f"[stream] Missing fields — "
-                        f"token:{bool(token)} expires:{bool(expires)} playlist:{bool(playlist_url)}"
-                    )
+                log.error(
+                    f"[stream] Missing fields — "
+                    f"token:{bool(token)} expires:{bool(expires)} playlist:{bool(playlist_url)}"
+                )
                 return None
 
             # Extract window.canPlayFHD
@@ -470,12 +470,12 @@ class SCScraper:
                 is_fhd = fhd_match.group(1).lower() == "true"
 
             # ── Step 3: assemble M3U8 URL ────────────────────────────────
-            master_m3u8 = f"{playlist_url}?token={token}&expires={expires}"
+            sep = "&" if "?" in playlist_url else "?"
+            master_m3u8 = f"{playlist_url}{sep}token={token}&expires={expires}"
             if is_fhd:
                 master_m3u8 += "&h=1"
 
-            if config.DEBUG:
-                log.info(f"[stream] OK → {master_m3u8[:80]}…")
+            log.info(f"[stream] OK → {master_m3u8[:80]}…")
 
             return master_m3u8, is_fhd
 
