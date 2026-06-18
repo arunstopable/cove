@@ -325,10 +325,13 @@ async def proxy_segment(url: str, request: Request) -> Response:
             raise HTTPException(
                 status_code=resp.status_code, detail="Failed to fetch segment."
             )
+        headers = {"Cache-Control": "no-cache"}
+        if "content-length" in resp.headers:
+            headers["Content-Length"] = resp.headers["content-length"]
         return StreamingResponse(
-            resp.aiter_raw(),
+            resp.aiter_raw(chunk_size=1048576),
             media_type="video/mp2t",
-            headers={"Cache-Control": "no-cache"},
+            headers=headers,
             background=BackgroundTask(client.aclose),
         )
     except httpx.RequestError as exc:
