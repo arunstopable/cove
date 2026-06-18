@@ -68,48 +68,9 @@ async def _get_stream_url(title_id: int, episode_id: int) -> Optional[str]:
 
     async with _scraper_lock:
         try:
-            titles = await asyncio.to_thread(scraper.search, str(title_id))
-            if not titles:
-                return None
-
-            slug = titles[0].get("slug")
-            await asyncio.to_thread(scraper.get_title_details, title_id, slug)
-
-            iframe_url = f"{scraper.active_domain}/it/iframe/{title_id}?episode_id={episode_id}&next_episode=1"
-            iframe_resp = await asyncio.to_thread(
-                scraper._get,
-                iframe_url,
-                headers={
-                    "Referer": f"{scraper.active_domain}/it/watch/{title_id}?e={episode_id}"
-                },
-            )
-
-            embed_match = re.search(
-                r"src=[\"\']+(https://vixcloud\.co/embed/[^\"\']+)[\"\']",
-                iframe_resp.text,
-            )
-            if not embed_match:
-                return None
-
-            embed_url = embed_match.group(1).replace("&amp;", "&")
-            vix_resp = await asyncio.to_thread(
-                scraper._get,
-                embed_url,
-                headers={"Referer": f"{scraper.active_domain}/"},
-            )
-
-            token_match = re.search(r"\'token\': \'([^\']+)\'", vix_resp.text)
-            expires_match = re.search(r"\'expires\': \'([^\']+)\'", vix_resp.text)
-            playlist_match = re.search(
-                r"url:\s*\'(https://vixcloud\.co/playlist/\d+)\'", vix_resp.text
-            )
-
-            if not (token_match and expires_match and playlist_match):
-                return None
-
-            master_url = f"{playlist_match.group(1)}?ub=1&token={token_match.group(1)}&expires={expires_match.group(1)}"
-
-            _stream_cache[(title_id, episode_id)] = (master_url, now)
+            master_url = await asyncio.to_thread(scraper.get_stream_url, title_id, episode_id)
+            if master_url:
+                _stream_cache[(title_id, episode_id)] = (master_url, now)
             return master_url
 
         except Exception as e:
@@ -204,11 +165,13 @@ async def play_m3u8(title_id: int, episode_id: int, request: Request) -> Respons
         )
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                m3u8_url,
-                headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT},
-            )
+        # IMPORTANT: the token in m3u8_url is tied to the scraper's session cookies.
+        # Using a separate httpx client always 403s. We must reuse scraper._get.
+        resp = await asyncio.to_thread(
+            scraper._get,
+            m3u8_url,
+            headers={"Referer": VIXCLOUD_REFERER, "Accept": "*/*"},
+        )
         if resp.status_code != 200:
             raise HTTPException(
                 status_code=resp.status_code, detail="Failed to fetch master M3U8."
@@ -233,13 +196,14 @@ async def play_m3u8(title_id: int, episode_id: int, request: Request) -> Respons
 async def proxy_child_m3u8(title_id: int, child_url: str, request: Request) -> Response:
     """
     Proxy a child M3U8 (video quality level, audio track, or subtitle track).
+    Child tokens are tied to the scraper's session — must reuse scraper._get.
     """
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                child_url,
-                headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT},
-            )
+        resp = await asyncio.to_thread(
+            scraper._get,
+            child_url,
+            headers={"Referer": VIXCLOUD_REFERER},
+        )
         if resp.status_code != 200:
             raise HTTPException(
                 status_code=resp.status_code, detail="Failed to fetch child M3U8."
@@ -251,7 +215,7 @@ async def proxy_child_m3u8(title_id: int, child_url: str, request: Request) -> R
             content=rewritten_m3u8, media_type="application/vnd.apple.mpegurl"
         )
 
-    except httpx.RequestError as exc:
+    except Exception as exc:
         log.error(f"Error proxying child M3U8: {exc}")
         raise HTTPException(
             status_code=502, detail="Error communicating with upstream server."
@@ -262,18 +226,49 @@ async def proxy_child_m3u8(title_id: int, child_url: str, request: Request) -> R
 async def proxy_enc_key(key_url: str) -> Response:
     """
     Proxy an AES-128 encryption key request.
+    Key tokens are tied to the scraper's session — must reuse scraper._get.
     """
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                key_url,
-                headers={"Referer": VIXCLOUD_REFERER, "User-Agent": config.USER_AGENT},
-            )
+        # Resolve relative paths (e.g. /storage/enc.key → https://vixcloud.co/storage/enc.key)
+        if key_url.startswith("/"):
+            key_url = f"https://vixcloud.co{key_url}"
+
+        resp = await asyncio.to_thread(
+            scraper._get,
+            key_url,
+            headers={"Referer": VIXCLOUD_REFERER},
+        )
         if resp.status_code != 200:
             raise HTTPException(
                 status_code=resp.status_code, detail="Failed to fetch key."
             )
         return Response(content=resp.content, media_type="application/octet-stream")
-    except httpx.RequestError as exc:
+    except Exception as exc:
         log.error(f"Error fetching encryption key: {exc}")
         raise HTTPException(status_code=502, detail="Error fetching encryption key.")
+
+
+@app.get("/segment")
+async def proxy_segment(url: str) -> Response:
+    """
+    Proxy a video/audio .ts segment from the CDN.
+
+    The CDN (sc-u12-01.vix-content.net) blocks browser UAs (Chrome) and media
+    player UAs (Lavf/MPV) with 403. Plain httpx with no custom UA works fine.
+    We deliberately do NOT set a User-Agent here so httpx uses its default.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=resp.status_code, detail="Failed to fetch segment."
+            )
+        return Response(
+            content=resp.content,
+            media_type="video/mp2t",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except httpx.RequestError as exc:
+        log.error(f"Error fetching segment: {exc}")
+        raise HTTPException(status_code=502, detail="Error fetching segment.")

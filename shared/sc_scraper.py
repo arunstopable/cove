@@ -243,30 +243,15 @@ class SCScraper:
                 embed_url, headers={"Referer": f"{self.active_domain}/"}
             )
 
-            token_match = re.search(r"\'token\': \'([^\']+)\'", vix_resp.text)
-            expires_match = re.search(r"\'expires\': \'([^\']+)\'", vix_resp.text)
-            playlist_match = re.search(
-                r"url:\s*\'(https://vixcloud\.co/playlist/\d+)\'", vix_resp.text
-            )
-
-            if not (token_match and expires_match and playlist_match):
-                return "Unknown"
-
-            master_url = f"{playlist_match.group(1)}?ub=1&token={token_match.group(1)}&expires={expires_match.group(1)}"
-            resp = self._get(
-                master_url,
-                headers={
-                    "Referer": "https://vixcloud.co/",
-                    "User-Agent": self.client.headers.get("User-Agent"),
-                },
-            )
-
-            max_h = 0
-            for line in resp.text.splitlines():
-                res = re.search(r"RESOLUTION=\d+x(\d+)", line)
-                if res:
-                    max_h = max(max_h, int(res.group(1)))
-            return f"{max_h}p" if max_h else "Unknown"
+            # Instead of fetching the master playlist which may 403,
+            # we check the javascript variable `window.canPlayFHD` embedded in the page.
+            fhd_match = re.search(r"window\.canPlayFHD\s*=\s*(true|false)", vix_resp.text, re.IGNORECASE)
+            
+            if fhd_match:
+                is_fhd = fhd_match.group(1).lower() == "true"
+                return "1080p" if is_fhd else "720p"
+            
+            return "Unknown"
         except Exception:
             return "Unknown"
 
@@ -408,7 +393,7 @@ class SCScraper:
                 return None
 
             # ── Step 3: assemble M3U8 URL ────────────────────────────────
-            master_m3u8 = f"{playlist_url}?ub=1&token={token}&expires={expires}"
+            master_m3u8 = f"{playlist_url}?token={token}&expires={expires}&h=1"
 
             if config.DEBUG:
                 print(f"[stream] OK → {master_m3u8[:80]}…")

@@ -516,16 +516,19 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
                 import subprocess
 
+                referer_arg = "--http-header-fields=Referer: https://vixcloud.co/"
+                
                 if config.PLAYER_APP.lower() == "iina":
                     cmd = [
                         "/Applications/IINA.app/Contents/MacOS/iina-cli",
                         "--keep-running",
+                        "--mpv-http-header-fields=Referer: https://vixcloud.co/",
                         play_target,
                     ]
                 elif config.PLAYER_APP.lower() == "vlc":
-                    cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+                    cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", "--http-referrer=https://vixcloud.co/", play_target]
                 else:
-                    cmd = [config.PLAYER_APP, play_target]
+                    cmd = [config.PLAYER_APP, play_target, referer_arg]
 
                 try:
                     subprocess.run(cmd, check=False)
@@ -551,16 +554,21 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                     ui.show_info(f"Streaming via proxy ({config.PLAYER_APP})...")
                     import subprocess
 
+                    # When using fake M3U8 fallback, the player needs the referer to fetch the actual stream.
+                    referer_arg = "--http-header-fields=Referer: https://vixcloud.co/"
+                    
                     if config.PLAYER_APP.lower() == "iina":
                         cmd = [
                             "/Applications/IINA.app/Contents/MacOS/iina-cli",
                             "--keep-running",
+                            "--mpv-http-header-fields=Referer: https://vixcloud.co/",
                             play_target,
                         ]
                     elif config.PLAYER_APP.lower() == "vlc":
-                        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
+                        # VLC uses --http-referrer
+                        cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", "--http-referrer=https://vixcloud.co/", play_target]
                     else:
-                        cmd = [config.PLAYER_APP, play_target]
+                        cmd = [config.PLAYER_APP, play_target, referer_arg]
 
                     try:
                         subprocess.run(cmd, check=False)

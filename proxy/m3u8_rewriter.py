@@ -76,6 +76,8 @@ def rewrite_child_m3u8(original_m3u8: str, child_url: str, proxy_base_url: str) 
     Parses a child playlist (video, audio, or subtitle).
     - Resolves relative TS segment paths to absolute URLs.
     - Intercepts EXT-X-KEY to proxy the AES-128 encryption key.
+    - Routes .ts segments through /segment proxy (CDN blocks browser/player UAs
+      but allows plain httpx/curl — so we must proxy them).
     """
     # child_url looks like: https://vixcloud.co/playlist/.../chunk.m3u8?...
     base_url = child_url.split("?")[0].rsplit("/", 1)[0] + "/"
@@ -100,6 +102,9 @@ def rewrite_child_m3u8(original_m3u8: str, child_url: str, proxy_base_url: str) 
             # It's a segment URL. Resolve if relative.
             if not line.startswith("http"):
                 line = urllib.parse.urljoin(base_url, line)
+            # Route through proxy segment endpoint so CDN sees neutral UA
+            enc_seg = urllib.parse.quote(line, safe="")
+            line = f"{proxy_base_url}/segment?url={enc_seg}"
             rewritten_lines.append(line)
 
     return "\n".join(rewritten_lines) + "\n"

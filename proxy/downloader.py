@@ -85,4 +85,5 @@ async def download_worker(get_stream_url_func) -> None:
             current_download["active"] = False
             current_download["relative_path"] = ""
             current_download["absolute_path"] = ""
-            download_queue.task_done()
+            # We must mark the task as done, but only if we haven't already.
+            pass
