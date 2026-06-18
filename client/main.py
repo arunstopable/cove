@@ -576,16 +576,7 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
                 import subprocess
 
-                if config.PLAYER_APP.lower() == "iina":
-                    cmd = [
-                        "/Applications/IINA.app/Contents/MacOS/iina-cli",
-                        "--keep-running",
-                        play_target,
-                    ]
-                elif config.PLAYER_APP.lower() == "vlc":
-                    cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
-                else:
-                    cmd = [config.PLAYER_APP, play_target]
+                cmd = ["open", "-a", config.PLAYER_APP, play_target]
 
                 try:
                     subprocess.run(cmd, check=False)
@@ -655,16 +646,7 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
         import subprocess
 
-        if config.PLAYER_APP.lower() == "iina":
-            cmd = [
-                "/Applications/IINA.app/Contents/MacOS/iina-cli",
-                "--keep-running",
-                play_target,
-            ]
-        elif config.PLAYER_APP.lower() == "vlc":
-            cmd = ["/Applications/VLC.app/Contents/MacOS/VLC", play_target]
-        else:
-            cmd = [config.PLAYER_APP, play_target]
+        cmd = ["open", "-a", config.PLAYER_APP, play_target]
 
         try:
             subprocess.run(cmd, check=False)
