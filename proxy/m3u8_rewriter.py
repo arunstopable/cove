@@ -46,14 +46,14 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
                 info_line, url_line = block
                 rewritten_lines.append(info_line)
                 enc_url = urllib.parse.quote(url_line, safe="")
-                proxy_url = f"proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
+                proxy_url = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
                 rewritten_lines.append(proxy_url)
     else:
         for block in stream_blocks:
             info_line, url_line = block
             rewritten_lines.append(info_line)
             enc_url = urllib.parse.quote(url_line, safe="")
-            proxy_url = f"proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
+            proxy_url = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
             rewritten_lines.append(proxy_url)
 
     # Rewrite Audio media definitions and filter out Subtitles
@@ -66,7 +66,7 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
             if uri_match:
                 orig_uri = uri_match.group(1)
                 enc_uri = urllib.parse.quote(orig_uri, safe="")
-                new_uri = f"proxy_child.m3u8?title_id={title_id}&child_url={enc_uri}"
+                new_uri = f"{proxy_base_url}/proxy_child.m3u8?title_id={title_id}&child_url={enc_uri}"
                 line = line.replace(f'URI="{orig_uri}"', f'URI="{new_uri}"')
         final_lines.append(line)
 
@@ -93,7 +93,7 @@ def rewrite_child_m3u8(original_m3u8: str, child_url: str, proxy_base_url: str) 
             if uri_match:
                 orig_key_uri = uri_match.group(1)
                 enc_key_uri = urllib.parse.quote(orig_key_uri, safe="")
-                new_key_uri = f"enc.key?key_url={enc_key_uri}"
+                new_key_uri = f"{proxy_base_url}/enc.key?key_url={enc_key_uri}"
                 line = line.replace(f'URI="{orig_key_uri}"', f'URI="{new_key_uri}"')
             rewritten_lines.append(line)
 
