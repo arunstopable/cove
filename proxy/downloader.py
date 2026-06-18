@@ -79,7 +79,27 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            _, stderr_data = await proc.communicate()
+            stderr_history = []
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break
+                
+                line_str = line.decode('utf-8', errors='replace')
+                stderr_history.append(line_str)
+                if len(stderr_history) > 50:
+                    stderr_history.pop(0)
+
+                if "Duration:" in line_str and "time_total" not in active_downloads[worker_id]:
+                    dur_match = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2})", line_str)
+                    if dur_match:
+                        active_downloads[worker_id]["time_total"] = dur_match.group(1)
+
+                time_match = re.search(r"time=(\d{2}:\d{2}:\d{2})", line_str)
+                if time_match:
+                    active_downloads[worker_id]["time_progress"] = time_match.group(1)
+
+            await proc.wait()
 
             if proc.returncode == 0 and os.path.exists(part_path):
                 shutil.move(part_path, out_path)
@@ -95,7 +115,7 @@ async def download_worker(worker_id: int, get_stream_url_func) -> None:
 
                 log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
             else:
-                err_msg = stderr_data.decode('utf-8', errors='replace') if stderr_data else "No stderr"
+                err_msg = "".join(stderr_history)
                 if len(err_msg) > 2000:
                     err_msg = "... [TRUNCATED] ...\n" + err_msg[-2000:]
                 log.error(f"[DOWNLOAD] ✗ Failed (code={proc.returncode}): {out_path}\nFFmpeg error:\n{err_msg}")

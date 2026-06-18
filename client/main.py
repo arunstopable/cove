@@ -422,7 +422,9 @@ def show_download_status() -> None:
                     for current in active_downloads:
                         lines.append(f"  {current.get('relative_path', 'Unknown')}")
                         mb = current.get('downloaded_mb', 0)
-                        lines.append(f"  [dim]Status:[/] Downloading (ffmpeg running...) - {mb} MB")
+                        progress = current.get('time_progress', '00:00:00')
+                        total = current.get('time_total', 'Unknown')
+                        lines.append(f"  [dim]Status:[/] Downloading (ffmpeg running...) - {mb} MB | [bold]{progress} / {total}[/]")
                         lines.append("")
                 else:
                     lines.append("[dim]No active downloads.[/]")

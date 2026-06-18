@@ -156,6 +156,8 @@ async def get_download_status() -> dict[str, Any]:
         if part_path and os.path.exists(part_path):
             downloaded_mb = round(os.path.getsize(part_path) / (1024 * 1024), 2)
         item["downloaded_mb"] = downloaded_mb
+        item["time_progress"] = current.get("time_progress", "00:00:00")
+        item["time_total"] = current.get("time_total", "Unknown")
         active_list.append(item)
 
     return {
