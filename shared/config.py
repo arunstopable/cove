@@ -28,6 +28,7 @@ PROXY_SERVER_PORT: int = int(os.environ.get("PROXY_SERVER_PORT", "8000"))
 # ── Local / NFS paths (used by CLI on Mac) ────────────────────────────────────
 NFS_SHOWS_PATH: str = os.environ.get("NFS_SHOWS_PATH", "/Volumes/Logan/shows")
 NFS_MOVIES_PATH: str = os.environ.get("NFS_MOVIES_PATH", "/Volumes/Logan/movies")
+NFS_WIP_PATH: str = os.environ.get("NFS_WIP_PATH", "/Volumes/Logan/.wip")
 
 # ── Server container paths (used by Proxy to save downloads) ──────────────────
 SERVER_SHOWS_PATH: str = os.environ.get("SERVER_SHOWS_PATH", "/shows")
