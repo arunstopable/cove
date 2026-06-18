@@ -323,7 +323,7 @@ def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 def _queue_download(
     title_id: int, episode_id: int, media_type: str, relative_path: str
 ) -> bool:
-    url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/download"
+    url = f"http://{config.PROXY_SERVER_IP}:{config.PROXY_SERVER_PORT}/api/downloads"
     payload = {
         "title_id": title_id,
         "episode_id": episode_id,
