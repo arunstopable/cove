@@ -82,6 +82,8 @@ async def download_worker(get_stream_url_func) -> None:
                 log.info(f"[DOWNLOAD] ✓ Success: {out_path}")
             else:
                 err_msg = stderr_data.decode('utf-8', errors='replace') if stderr_data else "No stderr"
+                if len(err_msg) > 2000:
+                    err_msg = "... [TRUNCATED] ...\n" + err_msg[-2000:]
                 log.error(f"[DOWNLOAD] ✗ Failed (code={proc.returncode}): {out_path}\nFFmpeg error:\n{err_msg}")
                 if os.path.exists(part_path):
                     os.remove(part_path)

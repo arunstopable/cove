@@ -56,9 +56,11 @@ def rewrite_master_m3u8(original_m3u8: str, proxy_base_url: str, title_id: int) 
             proxy_url = f"proxy_child.m3u8?title_id={title_id}&child_url={enc_url}"
             rewritten_lines.append(proxy_url)
 
-    # Rewrite Audio / Subtitle media definitions
+    # Rewrite Audio media definitions and filter out Subtitles
     final_lines = []
     for line in rewritten_lines:
+        if line.startswith("#EXT-X-MEDIA:TYPE=SUBTITLES"):
+            continue  # Drop subtitles to prevent ffmpeg MKV muxer crashes
         if line.startswith("#EXT-X-MEDIA:"):
             uri_match = re.search(r'URI="([^"]+)"', line)
             if uri_match:
