@@ -591,7 +591,7 @@ def handle_movie(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
     if episodes_direct:
         ep_id = episodes_direct[0].get("id")
     if not ep_id:
-        fallback = details.get("loadedSeason", {}).get("episodes", [])
+        fallback = (details.get("loadedSeason") or {}).get("episodes", [])
         if fallback:
             ep_id = fallback[0].get("id")
 
