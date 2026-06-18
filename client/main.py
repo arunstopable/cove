@@ -203,14 +203,7 @@ def export_media(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         with ui.spinner(f"Fetching details for {name}..."):
             details = scraper.get_title_details(title_id, slug)
 
-        ep_id: Optional[int] = None
-        episodes_direct = details.get("title", {}).get("episodes", [])
-        if episodes_direct:
-            ep_id = episodes_direct[0].get("id")
-        if not ep_id:
-            fallback = details.get("loadedSeason", {}).get("episodes", [])
-            if fallback:
-                ep_id = fallback[0].get("id")
+        ep_id = extract_movie_ep_id(details)
 
         if not ep_id:
             ui.show_error(f"Could not find playback ID for {name}.")
