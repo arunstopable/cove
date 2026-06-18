@@ -103,9 +103,6 @@ def rewrite_child_m3u8(original_m3u8: str, child_url: str, proxy_base_url: str) 
             # It's a segment URL. Resolve if relative.
             if not line.startswith("http"):
                 line = urllib.parse.urljoin(base_url, line)
-            # Route through proxy segment endpoint so CDN sees neutral UA
-            enc_seg = urllib.parse.quote(line, safe="")
-            line = f"segment.ts?url={enc_seg}"
             rewritten_lines.append(line)
 
     return "\n".join(rewritten_lines) + "\n"
