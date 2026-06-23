@@ -257,11 +257,30 @@ def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
         ui.print_header()
         ui.show_info(f"Target: {name}")
 
-        scope = ui.select_scope(name, seasons)
-        if not scope or scope == "BACK":
+        dl_choice = questionary.select(
+            "Download Scope:",
+            choices=[
+                questionary.Choice(title="  Entire Show", value="SHOW"),
+                questionary.Choice(title="  Specific Season (All Episodes)", value="SEASON"),
+                questionary.Choice(title="  Specific Episodes", value="SPECIFIC"),
+                ui._back()
+            ],
+            style=ui.cove_style,
+            pointer="❯",
+            qmark="",
+        ).ask()
+
+        if not dl_choice or dl_choice == "BACK":
             return
 
-        target_seasons = seasons if scope == "ALL" else [scope]
+        target_seasons = seasons
+        
+        if dl_choice == "SEASON" or dl_choice == "SPECIFIC":
+            selected_season = ui.select_season(seasons)
+            if not selected_season or selected_season == "BACK":
+                return
+            target_seasons = [selected_season]
+
         queued = 0
 
         for season in target_seasons:
@@ -270,40 +289,20 @@ def download_offline(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
                 season_data = scraper.get_season_details(title_id, slug, season_num)
                 episodes = season_data.get("loadedSeason", {}).get("episodes", [])
 
-            # If a specific season was selected, ask if they want all or specific episodes
             target_episodes = episodes
-            if scope != "ALL":
-                ui.clear_screen()
-                ui.print_header()
-                dl_choice = questionary.select(
-                    "Download Scope:",
-                    choices=[
-                        questionary.Choice(
-                            title="  Download Entire Season", value="ALL"
-                        ),
-                        questionary.Choice(
-                            title="  Select Specific Episodes", value="SPECIFIC"
-                        ),
-                    ],
-                    style=ui.cove_style,
-                    pointer="❯",
-                    qmark="",
-                ).ask()
+            if dl_choice == "SPECIFIC":
+                downloaded_nums = get_downloaded_ep_nums(name, season_num)
+                downloaded_ids = {
+                    ep["id"]
+                    for ep in episodes
+                    if ep.get("number") in downloaded_nums and "id" in ep
+                }
+                downloading_ids = get_downloading_ep_ids()
 
-                if dl_choice == "SPECIFIC":
-                    downloaded_nums = get_downloaded_ep_nums(name, season_num)
-                    downloaded_ids = {
-                        ep["id"]
-                        for ep in episodes
-                        if ep.get("number") in downloaded_nums and "id" in ep
-                    }
-                    downloading_ids = get_downloading_ep_ids()
+                target_episodes = ui.select_episodes_multi(episodes, downloaded_ids, downloading_ids)
+                if not target_episodes:
+                    continue
 
-                    target_episodes = ui.select_episodes_multi(episodes, downloaded_ids, downloading_ids)
-                    if not target_episodes:
-                        return
-
-            # Queue them
             for ep in target_episodes:
                 ep_num: int = ep.get("number", 0)
                 ep_id: Optional[int] = ep.get("id")
@@ -556,8 +555,24 @@ def handle_tv_show(scraper: SCScraper, sc_title: dict[str, Any]) -> None:
 
             ep_id: int = episode.get("id", 0)
             ep_num: int = episode.get("number", 0)
+            is_downloaded = ep_num in downloaded_nums
 
-            if ep_num in downloaded_nums:
+            if ui.SERVER_ONLINE:
+                ep_action = ui.select_episode_action(is_downloaded)
+                if not ep_action or ep_action == "BACK":
+                    continue
+            else:
+                ep_action = "PLAY"
+
+            if ep_action == "DOWNLOAD":
+                ep_name = safe_filename(episode.get("name", f"Episode {ep_num}"))
+                rel_path = f"{name}/Season {season_num:02d}/{name} S{season_num:02d}E{ep_num:02d} - {ep_name}.mkv"
+                if _queue_download(title_id, ep_id, "tv", rel_path):
+                    ui.show_success("Queued episode for background download.")
+                input("\nPress Enter to continue...")
+                continue
+
+            if is_downloaded:
                 target_dir = os.path.join(config.NFS_SHOWS_PATH, safe_filename(name), f"Season {season_num:02d}")
                 play_target = None
                 for f in os.listdir(target_dir):
@@ -809,39 +824,59 @@ def main() -> None:
                     input("\nPress Enter to return...")
                     continue
 
-            # Title selected -> Action menu
+            # Title selected -> Type specific flow
             while True:
                 ui.clear_screen()
                 ui.print_header()
 
                 name = selected.get("name", "Unknown")
-                kind = "TV" if selected.get("type") == "tv" else "Movie"
-                ui.show_info(f"Selected: {name} ({kind})")
+                is_tv = selected.get("type") == "tv"
+                kind = "TV" if is_tv else "Movie"
+                ui.show_info(f"Title: [bold white]{name}[/] ({kind})")
 
-                if not ui.SERVER_ONLINE:
-                    action = "PLAY"
-                else:
-                    action = ui.select_action()
+                if is_tv:
+                    action = ui.select_tv_action() if ui.SERVER_ONLINE else "BROWSE"
                     if not action or action == "BACK":
                         break
-
-                if action == "EXPORT":
-                    export_media(scraper, selected)
-                    input("\nPress Enter to continue...")
-                elif action == "DOWNLOAD":
-                    download_offline(scraper, selected)
-                    input("\nPress Enter to continue...")
-                elif action == "CLEANUP":
-                    cleanup_offline(scraper, selected)
-                    input("\nPress Enter to continue...")
-                elif action == "PLAY":
-                    if selected.get("type") == "tv":
+                        
+                    if action == "BROWSE":
                         handle_tv_show(scraper, selected)
-                    else:
-                        handle_movie(scraper, selected)
-
-                    if not ui.SERVER_ONLINE:
+                        if not ui.SERVER_ONLINE:
+                            break
+                    elif action == "BATCH_DOWNLOAD":
+                        download_offline(scraper, selected)
+                        input("\nPress Enter to continue...")
+                    elif action == "MANAGE":
+                        manage_action = ui.select_manage_action()
+                        if manage_action == "EXPORT":
+                            export_media(scraper, selected)
+                            input("\nPress Enter to continue...")
+                        elif manage_action == "CLEANUP":
+                            cleanup_offline(scraper, selected)
+                            input("\nPress Enter to continue...")
+                else:
+                    movie_dir = os.path.join(config.NFS_MOVIES_PATH, safe_filename(name))
+                    has_mkv = any(f.endswith(".mkv") for f in os.listdir(movie_dir)) if os.path.exists(movie_dir) else False
+                    
+                    action = ui.select_movie_action(has_mkv) if ui.SERVER_ONLINE else "PLAY"
+                    if not action or action == "BACK":
                         break
+                        
+                    if action == "PLAY":
+                        handle_movie(scraper, selected)
+                        if not ui.SERVER_ONLINE:
+                            break
+                    elif action == "DOWNLOAD":
+                        download_offline(scraper, selected)
+                        input("\nPress Enter to continue...")
+                    elif action == "MANAGE":
+                        manage_action = ui.select_manage_action()
+                        if manage_action == "EXPORT":
+                            export_media(scraper, selected)
+                            input("\nPress Enter to continue...")
+                        elif manage_action == "CLEANUP":
+                            cleanup_offline(scraper, selected)
+                            input("\nPress Enter to continue...")
 
     except (KeyboardInterrupt, EOFError):
         ui.console.print("\n[dim]Aborted by user.[/]")

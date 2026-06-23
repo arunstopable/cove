@@ -7,7 +7,10 @@ load_dotenv()
 # StreamingCommunity
 # ---------------------------------------------------------------------------
 # Anchor page used to discover the active domain
-SC_ANCHOR_URL: str = os.environ.get("SC_ANCHOR_URL", "https://streamingcommunity.buzz/")
+SC_ANCHOR_URL: str = os.environ.get("SC_ANCHOR_URL", "https://www.streaming-community.co/")
+SC_DOMAIN: str = os.environ.get("SC_DOMAIN", "")
+SC_USERNAME: str = os.environ.get("SC_USERNAME", "")
+SC_PASSWORD: str = os.environ.get("SC_PASSWORD", "")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Global Constants

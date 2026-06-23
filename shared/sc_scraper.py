@@ -112,6 +112,12 @@ class SCScraper:
 
     def resolve_domain(self) -> str:
         """Discover the live StreamingCommunity domain from the anchor page."""
+        if config.SC_DOMAIN:
+            self.active_domain = config.SC_DOMAIN
+            if config.DEBUG:
+                print(f"[domain] Using explicit domain → {self.active_domain}")
+            return self.active_domain
+
         try:
             resp = self._get(config.SC_ANCHOR_URL)
             html = resp.text
@@ -246,6 +252,21 @@ class SCScraper:
 
             self._session_valid = bool(self.xsrf_token and self.inertia_version)
             self._last_init = datetime.now()
+
+            if config.SC_USERNAME and config.SC_PASSWORD and self._session_valid:
+                login_data = {
+                    "username": config.SC_USERNAME,
+                    "password": config.SC_PASSWORD,
+                    "remember": True
+                }
+                headers = self._inertia_headers("/login")
+                post_resp = self.client.post(
+                    f"{self.active_domain}/login",
+                    data=login_data,
+                    headers=headers
+                )
+                if config.DEBUG:
+                    print(f"[session] Login POST status: {post_resp.status_code}")
 
             if config.DEBUG:
                 print(

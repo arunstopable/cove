@@ -22,24 +22,28 @@ MAX_QUALITY = "Unknown"
 # Styling Theme
 # ──────────────────────────────────────────────────────────────────────────────
 
-APPLE_BLUE = "#007AFF"
+APPLE_BLUE = "#0A84FF"
 CRISP_WHITE = "#FFFFFF"
 DIM_GRAY = "#8E8E93"
-SOFT_RED = "#FF3B30"
-SOFT_GREEN = "#34C759"
+SOFT_RED = "#FF453A"
+SOFT_GREEN = "#32D74B"
 BORDER_GRAY = "#333333"
+WARM_YELLOW = "#FFD60A"
+RICH_PURPLE = "#BF5AF2"
+CYAN = "#64D2FF"
 
 cove_style = questionary.Style(
     [
-        ("qmark", f"fg:{APPLE_BLUE} bold"),
+        ("qmark", f"fg:{CYAN} bold"),
         ("question", f"fg:{CRISP_WHITE} bold"),
         ("answer", f"fg:{APPLE_BLUE} bold"),
-        ("pointer", f"fg:{APPLE_BLUE} bold"),
-        ("highlighted", f"fg:{APPLE_BLUE} bold"),
+        ("pointer", f"fg:{RICH_PURPLE} bold"),
+        ("highlighted", f"fg:{APPLE_BLUE} bold bg:#1C1C1E"),
         ("selected", f"fg:{SOFT_GREEN} bold"),
         ("separator", f"fg:{DIM_GRAY}"),
-        ("instruction", f"fg:{DIM_GRAY} italic"),
-        ("text", f"fg:#CCCCCC"),
+        ("instruction", f"fg:{WARM_YELLOW} italic"),
+        ("text", f"fg:#E5E5EA"),
+        ("disabled", f"fg:{DIM_GRAY} italic"),
     ]
 )
 
@@ -149,17 +153,17 @@ def ask_search_query() -> str:
 
 def select_main_menu() -> str:
     choices = [
-        questionary.Choice(title="  Search Title", value="SEARCH"),
+        questionary.Choice(title=FormattedText([("class:ansicyan", "  Search Titles")]), value="SEARCH"),
     ]
     if NFS_ONLINE:
-        choices.append(questionary.Choice(title="  My Library", value="LIBRARY"))
+        choices.append(questionary.Choice(title=FormattedText([("class:ansiblue", "  My Library")]), value="LIBRARY"))
 
     if SERVER_ONLINE:
         choices.append(
-            questionary.Choice(title="  View Download Status", value="STATUS")
+            questionary.Choice(title=FormattedText([("class:ansiyellow", "  Active Downloads")]), value="STATUS")
         )
 
-    choices.append(questionary.Choice(title="  Exit", value="EXIT"))
+    choices.append(questionary.Choice(title=FormattedText([("class:ansidarkgray", "  Exit")]), value="EXIT"))
 
     return questionary.select(
         "Main Menu:",
@@ -232,50 +236,49 @@ def select_sc_search_result(
     ).ask()
 
 
-def select_action() -> str:
+def select_movie_action(has_mkv: bool) -> str:
+    choices = []
+    play_label = "  Play (Downloaded)" if has_mkv else "  Play (Stream)"
+    choices.append(questionary.Choice(title=FormattedText([("class:ansigreen" if has_mkv else "class:ansicyan", play_label)]), value="PLAY"))
+    
+    if SERVER_ONLINE and not has_mkv:
+        choices.append(questionary.Choice(title="  Download Offline", value="DOWNLOAD"))
+    if SERVER_ONLINE:
+        choices.append(questionary.Choice(title="  Manage...", value="MANAGE"))
+        
+    choices.append(_back())
+    return questionary.select("Action:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
+
+def select_tv_action() -> str:
     choices = [
-        questionary.Choice(title="  Play Locally", value="PLAY"),
+        questionary.Choice(title=FormattedText([("class:ansicyan", "  Browse Episodes")]), value="BROWSE"),
     ]
     if SERVER_ONLINE:
-        choices.extend(
-            [
-                questionary.Choice(title="  Download Offline", value="DOWNLOAD"),
-                questionary.Choice(title="  Export to Jellyfin", value="EXPORT"),
-                questionary.Choice(title="  Cleanup Physical Files", value="CLEANUP"),
-            ]
-        )
+        choices.extend([
+            questionary.Choice(title="  Batch Download", value="BATCH_DOWNLOAD"),
+            questionary.Choice(title="  Manage...", value="MANAGE"),
+        ])
     choices.append(_back())
+    return questionary.select("Action:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
 
-    return questionary.select(
-        "Action:",
-        choices=choices,
-        style=cove_style,
-        qmark="",
-        pointer="❯",
-    ).ask()
+def select_episode_action(is_downloaded: bool) -> str:
+    choices = []
+    play_label = "  Play (Downloaded)" if is_downloaded else "  Play (Stream)"
+    choices.append(questionary.Choice(title=FormattedText([("class:ansigreen" if is_downloaded else "class:ansicyan", play_label)]), value="PLAY"))
+    
+    if SERVER_ONLINE and not is_downloaded:
+        choices.append(questionary.Choice(title="  Download", value="DOWNLOAD"))
+        
+    choices.append(_back())
+    return questionary.select("Action:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
 
-
-def select_scope(
-    show_name: str, seasons: list[dict[str, Any]]
-) -> Union[str, dict[str, Any], None]:
-    choices: list[questionary.Choice] = [
-        questionary.Choice(title=f"  All Seasons ({show_name})", value="ALL")
+def select_manage_action() -> str:
+    choices = [
+        questionary.Choice(title="  Export to Jellyfin (.strm)", value="EXPORT"),
+        questionary.Choice(title="  Cleanup Physical Files", value="CLEANUP"),
+        _back()
     ]
-
-    for s in seasons:
-        num = s.get("number", "?")
-        eps = s.get("episodes_count", 0)
-        label = f"  Season {num} ({eps} eps)"
-        choices.append(questionary.Choice(title=label, value=s))
-
-    choices.append(_back())
-    return questionary.select(
-        "Select Scope:",
-        choices=choices,
-        style=cove_style,
-        qmark="",
-        pointer="❯",
-    ).ask()
+    return questionary.select("Manage:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
 
 
 def select_season(seasons: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
