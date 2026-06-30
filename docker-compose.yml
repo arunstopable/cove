@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  cove-proxy:
+    build: .
+    image: cove-proxy:latest
+    container_name: cove-proxy
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      - SC_DOMAIN=https://streamingunity.dog
+      - SC_USERNAME=arunstopable
+      - SC_PASSWORD=pydjyb-Wuwpun-7bihci
+      # Opzionale: aggiungi altri parametri qui se necessario
+    volumes:
+      - /mnt/Wolverine/Logan/shows:/shows
+      - /mnt/Wolverine/Logan/movies:/movies
+      - /mnt/Wolverine/Logan/.wip:/wip

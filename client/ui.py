@@ -2,12 +2,10 @@
 
 import os
 from contextlib import contextmanager
-from typing import Any, Generator, Union
+from typing import Any, Generator, Union, List, Set, Optional
 
 import questionary
 from prompt_toolkit.formatted_text import FormattedText
-from rich.console import Console
-from rich.panel import Panel
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -17,6 +15,7 @@ console = Console()
 SERVER_ONLINE = False
 NFS_ONLINE = False
 MAX_QUALITY = "Unknown"
+ACTIVE_DOWNLOADS_COUNT = 0
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Styling Theme
@@ -26,113 +25,95 @@ APPLE_BLUE = "#0A84FF"
 CRISP_WHITE = "#FFFFFF"
 DIM_GRAY = "#8E8E93"
 SOFT_RED = "#FF453A"
-SOFT_GREEN = "#32D74B"
 BORDER_GRAY = "#333333"
-WARM_YELLOW = "#FFD60A"
-RICH_PURPLE = "#BF5AF2"
-CYAN = "#64D2FF"
 
 cove_style = questionary.Style(
     [
-        ("qmark", f"fg:{CYAN} bold"),
+        ("qmark", f"fg:{DIM_GRAY} bold"),
         ("question", f"fg:{CRISP_WHITE} bold"),
         ("answer", f"fg:{APPLE_BLUE} bold"),
-        ("pointer", f"fg:{RICH_PURPLE} bold"),
+        ("pointer", f"fg:{APPLE_BLUE} bold"),
         ("highlighted", f"fg:{APPLE_BLUE} bold bg:#1C1C1E"),
-        ("selected", f"fg:{SOFT_GREEN} bold"),
+        ("selected", f"fg:{CRISP_WHITE} bold"),
         ("separator", f"fg:{DIM_GRAY}"),
-        ("instruction", f"fg:{WARM_YELLOW} italic"),
+        ("instruction", f"fg:{DIM_GRAY} italic"),
         ("text", f"fg:#E5E5EA"),
         ("disabled", f"fg:{DIM_GRAY} italic"),
     ]
 )
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Core Engine
 # ──────────────────────────────────────────────────────────────────────────────
-
 
 def clear_screen() -> None:
     """Clear the terminal screen completely."""
     os.system("cls" if os.name == "nt" else "clear")
 
-
 def print_header() -> None:
-    logo = """[bold white]
-   ██████╗ ██████╗ ██╗   ██╗███████╗
-  ██╔════╝██╔═══██╗██║   ██║██╔════╝
-  ██║     ██║   ██║██║   ██║█████╗  
-  ██║     ██║   ██║╚██╗ ██╔╝██╔══╝  
-  ╚██████╗╚██████╔╝ ╚████╔╝ ███████╗
-   ╚═════╝ ╚═════╝   ╚═══╝  ╚══════╝
-[/]"""
     status_proxy = (
-        f"[bold green]● Proxy Online[/]"
+        f"[bold {APPLE_BLUE}]Proxy Online[/]"
         if SERVER_ONLINE
-        else f"[bold red]○ Proxy Offline[/]"
+        else f"[bold {DIM_GRAY}]Proxy Offline[/]"
     )
     status_nfs = (
-        f"[bold green]● NFS Connected[/]"
+        f"[bold {APPLE_BLUE}]NFS Connected[/]"
         if NFS_ONLINE
-        else f"[bold red]○ NFS Disconnected[/]"
+        else f"[bold {DIM_GRAY}]NFS Disconnected[/]"
     )
 
     if MAX_QUALITY == "1080p":
-        status_q = f"[bold {SOFT_GREEN}]★ VIP (1080p)[/]"
+        status_q = f"[bold {CRISP_WHITE}]★ 1080p[/]"
     elif MAX_QUALITY == "720p":
-        status_q = f"[bold {CRISP_WHITE}]○ Free (720p)[/]"
+        status_q = f"[bold {DIM_GRAY}]○ 720p[/]"
     else:
-        status_q = f"[dim]○ Q: ?[/]"
+        status_q = f"[bold {DIM_GRAY}]○ Unknown Q[/]"
+
+    dl_text = f"  |  [bold {CRISP_WHITE}]↓ {ACTIVE_DOWNLOADS_COUNT} downloading[/]" if ACTIVE_DOWNLOADS_COUNT > 0 else ""
+
+    header_text = f"[bold {CRISP_WHITE}]COVE[/]  ·  {status_proxy}  |  {status_nfs}  |  {status_q}{dl_text}"
 
     console.print(
         Panel(
-            logo.strip() + f"\n\n  {status_proxy}  |  {status_nfs}  |  {status_q}",
+            header_text,
             border_style=BORDER_GRAY,
             expand=False,
+            padding=(0, 1)
         )
     )
     console.print()
 
-
 def show_error(msg: str) -> None:
-    console.print(f"[bold {SOFT_RED}]x[/] [{SOFT_RED}]{msg}[/]")
-
+    console.print(f"[bold {SOFT_RED}]![/] [{CRISP_WHITE}]{msg}[/]")
 
 def show_success(msg: str) -> None:
-    console.print(f"[bold {SOFT_GREEN}]✓[/] [{SOFT_GREEN}]{msg}[/]")
-
+    console.print(f"[bold {APPLE_BLUE}]✓[/] [{CRISP_WHITE}]{msg}[/]")
 
 def show_info(msg: str) -> None:
-    console.print(f"[bold {APPLE_BLUE}]i[/] [{CRISP_WHITE}]{msg}[/]")
-
+    console.print(f"[bold {DIM_GRAY}]i[/] [{CRISP_WHITE}]{msg}[/]")
 
 @contextmanager
 def spinner(message: str) -> Generator[None, None, None]:
     """Transient spinner context manager for background operations."""
     with Progress(
         SpinnerColumn(spinner_name="dots", style=APPLE_BLUE),
-        TextColumn(f"[{CRISP_WHITE}]{message}[/]"),
+        TextColumn(f"[{DIM_GRAY}]{message}[/]"),
         transient=True,
         console=console,
     ) as progress:
         progress.add_task("", total=None)
         yield
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
-
 
 def _back() -> questionary.Choice:
     return questionary.Choice(
         title=FormattedText([("class:ansidarkgray", "< Back")]), value="BACK"
     )
 
-
 def _year(title: dict[str, Any]) -> str:
-    """Extract a 4-digit year string from a title dict, or empty string."""
     date: str = (
         title.get("release_date")
         or title.get("first_air_date")
@@ -141,29 +122,26 @@ def _year(title: dict[str, Any]) -> str:
     )
     return str(date)[:4] if len(str(date)) >= 4 else ""
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Prompts & Selectors
 # ──────────────────────────────────────────────────────────────────────────────
 
-
 def ask_search_query() -> str:
-    return questionary.text("Search title:", style=cove_style, qmark=">").ask()
-
+    return questionary.text("Search title:", style=cove_style, qmark="").ask()
 
 def select_main_menu() -> str:
     choices = [
-        questionary.Choice(title=FormattedText([("class:ansicyan", "  Search Titles")]), value="SEARCH"),
+        questionary.Choice(title=FormattedText([("", "Search Titles")]), value="SEARCH"),
     ]
     if NFS_ONLINE:
-        choices.append(questionary.Choice(title=FormattedText([("class:ansiblue", "  My Library")]), value="LIBRARY"))
+        choices.append(questionary.Choice(title=FormattedText([("", "My Library")]), value="LIBRARY"))
 
     if SERVER_ONLINE:
         choices.append(
-            questionary.Choice(title=FormattedText([("class:ansiyellow", "  Active Downloads")]), value="STATUS")
+            questionary.Choice(title=FormattedText([("", "Active Downloads")]), value="STATUS")
         )
 
-    choices.append(questionary.Choice(title=FormattedText([("class:ansidarkgray", "  Exit")]), value="EXIT"))
+    choices.append(questionary.Choice(title=FormattedText([("class:ansidarkgray", "Exit")]), value="EXIT"))
 
     return questionary.select(
         "Main Menu:",
@@ -173,21 +151,17 @@ def select_main_menu() -> str:
         pointer="❯",
     ).ask()
 
-
-def select_library_item(
-    items: list[dict[str, Any]],
-) -> Union[dict[str, Any], str, None]:
+def select_library_item(items: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
     choices: list[questionary.Choice] = []
 
     for item in items:
         name = item.get("name", "Unknown")
         kind = "TV" if item.get("type") == "tv" else "Movie"
-        color = "class:ansicyan" if kind == "TV" else "class:ansiblue"
+        color = "class:ansiwhite"
 
         label = FormattedText(
             [
-                (color, "■ "),
-                ("", f"{name} "),
+                (color, f"{name} "),
                 ("class:ansidarkgray", f"[{kind}]"),
             ]
         )
@@ -195,18 +169,14 @@ def select_library_item(
 
     choices.append(_back())
     return questionary.select(
-        "Select from Library:",
+        "Library:",
         choices=choices,
         style=cove_style,
         qmark="",
         pointer="❯",
     ).ask()
 
-
-def select_sc_search_result(
-    results: list[dict[str, Any]],
-) -> Union[dict[str, Any], str, None]:
-    """Display search results with type and year labels."""
+def select_sc_search_result(results: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
     choices: list[questionary.Choice] = []
 
     for r in results:
@@ -214,13 +184,11 @@ def select_sc_search_result(
         is_tv = r.get("type") == "tv"
         kind = "TV" if is_tv else "Movie"
         year = _year(r)
-        color = "class:ansicyan" if is_tv else "class:ansiblue"
         suffix = f" [{kind}{', ' + year if year else ''}]"
 
         label = FormattedText(
             [
-                (color, "■ "),
-                ("", f"{name} "),
+                ("class:ansiwhite", f"{name} "),
                 ("class:ansidarkgray", suffix),
             ]
         )
@@ -235,59 +203,77 @@ def select_sc_search_result(
         pointer="❯",
     ).ask()
 
+def confirm(msg: str) -> bool:
+    return questionary.confirm(msg, style=cove_style, qmark="").ask()
 
-def select_movie_action(has_mkv: bool) -> str:
-    choices = []
-    play_label = "  Play (Downloaded)" if has_mkv else "  Play (Stream)"
-    choices.append(questionary.Choice(title=FormattedText([("class:ansigreen" if has_mkv else "class:ansicyan", play_label)]), value="PLAY"))
+# ──────────────────────────────────────────────────────────────────────────────
+# Title Card & Specific Menus
+# ──────────────────────────────────────────────────────────────────────────────
+
+def select_title_action(sc_title: dict[str, Any], has_mkv: bool, has_strm: bool) -> str:
+    """Unified title card action menu for both Movies and TV Shows."""
+    name = sc_title.get("name", "Unknown")
+    is_tv = sc_title.get("type") == "tv"
+    kind = "TV" if is_tv else "Movie"
     
-    if SERVER_ONLINE and not has_mkv:
-        choices.append(questionary.Choice(title="  Download Offline", value="DOWNLOAD"))
-    if SERVER_ONLINE:
-        choices.append(questionary.Choice(title="  Manage...", value="MANAGE"))
-        
-    choices.append(_back())
-    return questionary.select("Action:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
-
-def select_tv_action() -> str:
-    choices = [
-        questionary.Choice(title=FormattedText([("class:ansicyan", "  Browse Episodes")]), value="BROWSE"),
-    ]
-    if SERVER_ONLINE:
-        choices.extend([
-            questionary.Choice(title="  Batch Download", value="BATCH_DOWNLOAD"),
-            questionary.Choice(title="  Manage...", value="MANAGE"),
-        ])
-    choices.append(_back())
-    return questionary.select("Action:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
-
-def select_episode_action(is_downloaded: bool) -> str:
-    choices = []
-    play_label = "  Play (Downloaded)" if is_downloaded else "  Play (Stream)"
-    choices.append(questionary.Choice(title=FormattedText([("class:ansigreen" if is_downloaded else "class:ansicyan", play_label)]), value="PLAY"))
+    # Check seasons logic
+    # In search results, seasons count might not be there. It's fine to omit it if 0.
+    seasons_count = sc_title.get("seasons_count", 0) 
+    if seasons_count == 0 and "seasons" in sc_title:
+        seasons_count = len(sc_title["seasons"])
     
-    if SERVER_ONLINE and not is_downloaded:
-        choices.append(questionary.Choice(title="  Download", value="DOWNLOAD"))
+    # Render Context Header
+    console.print(f"╭─ [bold {CRISP_WHITE}]{name}[/] · {kind} ─{'─'*40}")
+    status_line = []
+    
+    if is_tv and seasons_count > 0:
+        status_line.append(f"{seasons_count} seasons")
         
+    if has_mkv:
+        status_line.append(f"[bold {APPLE_BLUE}]Downloaded[/]")
+    elif has_strm:
+        status_line.append(f"[bold {CRISP_WHITE}]In Library (.strm)[/]")
+    else:
+        status_line.append(f"[bold {DIM_GRAY}]Not in library[/]")
+        
+    console.print(f"│  {' · '.join(status_line)}")
+    console.print(f"╰{'─'*60}")
+    console.print()
+
+    choices = []
+    
+    if is_tv:
+        choices.append(questionary.Choice(title="Browse Episodes", value="BROWSE"))
+        if SERVER_ONLINE:
+            choices.append(questionary.Choice(title="Download Season...", value="DOWNLOAD_SEASON"))
+    else:
+        play_label = "Play (Local)" if has_mkv else "Play (Stream)"
+        choices.append(questionary.Choice(title=play_label, value="PLAY"))
+        if SERVER_ONLINE and not has_mkv:
+            choices.append(questionary.Choice(title="Download Offline", value="DOWNLOAD"))
+
+    # Library Management
+    if not has_strm and not has_mkv:
+        choices.append(questionary.Choice(title="Add to Library (.strm)", value="EXPORT"))
+    else:
+        if has_mkv:
+            choices.append(questionary.Choice(title="Manage Local Files (Delete/Re-export)", value="CLEANUP"))
+        else:
+            choices.append(questionary.Choice(title="Remove from Library", value="CLEANUP"))
+            
     choices.append(_back())
     return questionary.select("Action:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
 
-def select_manage_action() -> str:
-    choices = [
-        questionary.Choice(title="  Export to Jellyfin (.strm)", value="EXPORT"),
-        questionary.Choice(title="  Cleanup Physical Files", value="CLEANUP"),
-        _back()
-    ]
-    return questionary.select("Manage:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
-
-
-def select_season(seasons: list[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
+def select_season(seasons: list[dict[str, Any]], for_download: bool = False) -> Union[dict[str, Any], str, None]:
     choices: list[questionary.Choice] = []
+
+    if for_download and len(seasons) > 1:
+        choices.append(questionary.Choice(title="All Seasons", value="ALL"))
 
     for s in seasons:
         num = s.get("number", "?")
         eps = s.get("episodes_count", 0)
-        label = f"  Season {num} ({eps} eps)"
+        label = f"Season {num} ({eps} eps)"
         choices.append(questionary.Choice(title=label, value=s))
 
     choices.append(_back())
@@ -299,15 +285,32 @@ def select_season(seasons: list[dict[str, Any]]) -> Union[dict[str, Any], str, N
         pointer="❯",
     ).ask()
 
+def select_episode_action(ep_num: int, title: str, is_downloaded: bool) -> str:
+    console.print(f"╭─ [bold {CRISP_WHITE}]Ep {ep_num:02d}: {title}[/] ─{'─'*40}")
+    status = f"[bold {APPLE_BLUE}]Downloaded[/]" if is_downloaded else f"[bold {DIM_GRAY}]Stream only[/]"
+    console.print(f"│  {status}")
+    console.print(f"╰{'─'*60}")
+    console.print()
+
+    choices = []
+    play_label = "Play (Local)" if is_downloaded else "Play (Stream)"
+    choices.append(questionary.Choice(title=play_label, value="PLAY"))
+    
+    if SERVER_ONLINE and not is_downloaded:
+        choices.append(questionary.Choice(title="Download Offline", value="DOWNLOAD"))
+        
+    choices.append(_back())
+    return questionary.select("Action:", choices=choices, style=cove_style, qmark="", pointer="❯").ask()
 
 def select_episode(
     episodes: list[dict[str, Any]],
     downloaded_ids: set[int] = None,
+    downloading_ids: set[int] = None,
     default: dict[str, Any] = None,
 ) -> Union[dict[str, Any], str, None]:
     choices: list[questionary.Choice] = []
-    if downloaded_ids is None:
-        downloaded_ids = set()
+    if downloaded_ids is None: downloaded_ids = set()
+    if downloading_ids is None: downloading_ids = set()
 
     default_choice = None
 
@@ -317,10 +320,10 @@ def select_episode(
         title: str = ep.get("name", "Untitled")
 
         if ep_id in downloaded_ids:
-            # Green checkmark for physically downloaded MKV files
-            prefix = [("class:ansigreen", "✓ ")]
+            prefix = [("class:ansiblue", "✓ ")]
+        elif ep_id in downloading_ids:
+            prefix = [("class:ansidarkgray", "↓ ")]
         else:
-            # Gray dot for streaming available
             prefix = [("class:ansidarkgray", "• ")]
 
         label = FormattedText(
@@ -351,16 +354,13 @@ def select_episode(
         **kwargs,
     ).ask()
 
-
 def select_episodes_multi(
     episodes: list[dict[str, Any]], downloaded_ids: set[int] = None, downloading_ids: set[int] = None
 ) -> list[dict[str, Any]]:
     """Multi-select checkbox for downloading specific episodes."""
     choices: list[questionary.Choice] = []
-    if downloaded_ids is None:
-        downloaded_ids = set()
-    if downloading_ids is None:
-        downloading_ids = set()
+    if downloaded_ids is None: downloaded_ids = set()
+    if downloading_ids is None: downloading_ids = set()
 
     for ep in episodes:
         num: int = ep.get("number", 0)
@@ -368,39 +368,20 @@ def select_episodes_multi(
         title: str = ep.get("name", "Untitled")
 
         if ep_id in downloaded_ids:
-            # Already downloaded
-            label = FormattedText(
-                [
-                    ("class:ansigreen", f"Ep {num:02d}: {title} (Downloaded)"),
-                ]
-            )
-            choices.append(
-                questionary.Choice(title=label, value=ep, disabled="Already downloaded")
-            )
+            label = FormattedText([("class:ansiblue", f"Ep {num:02d}: {title} (Downloaded)")])
+            choices.append(questionary.Choice(title=label, value=ep, disabled="Already downloaded"))
         elif ep_id in downloading_ids:
-            # Downloading
-            label = FormattedText(
-                [
-                    ("class:ansiyellow", f"Ep {num:02d}: {title} (Downloading...)"),
-                ]
-            )
-            choices.append(
-                questionary.Choice(title=label, value=ep, disabled="Currently downloading")
-            )
+            label = FormattedText([("class:ansidarkgray", f"Ep {num:02d}: {title} (Downloading)")])
+            choices.append(questionary.Choice(title=label, value=ep, disabled="Downloading"))
         else:
-            label = FormattedText(
-                [
-                    ("", f"Ep {num:02d}: "),
-                    ("class:ansidarkgray", title),
-                ]
-            )
+            label = FormattedText([("", f"Ep {num:02d}: "), ("class:ansidarkgray", title)])
             choices.append(questionary.Choice(title=label, value=ep))
 
     if not choices or all(c.disabled for c in choices):
         return []
 
     return questionary.checkbox(
-        "Select episodes to download (Space to select, Enter to confirm):",
+        "Select episodes to download:",
         choices=choices,
         style=cove_style,
         qmark="",
